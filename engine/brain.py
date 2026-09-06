@@ -32,6 +32,7 @@ import json
 from typing import Any, Callable, Dict, List, Optional
 
 import fake_brain  # engine/fake_brain.py: catalog loader + validator (stdlib)
+import questions   # engine/questions.py: templated questions (ADR 0018)
 from ollama_client import OllamaClient, OllamaUnavailable
 
 # A "chat" callable: (system_prompt, user_prompt) -> parsed JSON dict.
@@ -137,7 +138,11 @@ class Brain:
     # -- planning --------------------------------------------------------------
 
     def plan(self, request: str, overview: Optional[dict] = None,
-             details: Optional[List[dict]] = None) -> Dict[str, Any]:
+             details: Optional[List[dict]] = None,
+             feature: Optional[str] = None,
+             done: Optional[List[str]] = None,
+             feedback: Optional[str] = None,
+             history: Optional[List[str]] = None) -> Dict[str, Any]:
         """
         Produce a plan from a natural-language request.
 
@@ -149,9 +154,22 @@ class Brain:
                     "geometric RAG" of Phase 3. They give the model the REAL
                     Edge*/Face* references (with hints) it needs to fillet, chamfer
                     or drill precise sub-elements, instead of guessing them.
+          feature:  (ADR 0017) when set, ask the model to plan ONLY this feature
+                    of the overall request (agentic per-feature loop).
+          done:     (ADR 0017) one-line summaries of the features already built,
+                    so the model does not redo them. A SUMMARY, not a transcript
+                    (realism: small models, ctx 8192).
+          feedback: (ADR 0017) failure text of the previous attempt at this same
+                    feature, for the bounded replan.
+          history:  (ADR 0019) compressed one-line summaries of this session's
+                    EARLIER requests (sliding window), so the model can resolve
+                    anaphora ("drill it") against objects made minutes ago.
+                    Summaries, never transcripts (realism: ctx 8192).
 
         Returns: {"actions": [...], "valid_actions": [...], "notes": [...],
-                  "clarification": str|None}
+                  "clarification": str|None, "ask": dict|None}
+        - ask: (ADR 0019) set when the model asked ONE clarification question
+          {"question", "options", "default"} instead of (or besides) acting.
         - actions:        everything the model proposed (raw)
         - valid_actions:  the subset that passed validation and is safe to run
         - notes:          human-readable messages (dropped actions, warnings)
@@ -159,7 +177,8 @@ class Brain:
         Raises PlanError if the model reply is unusable.
         """
         system = self._system_prompt()
-        user = self._user_prompt(request, overview, details)
+        user = self._user_prompt(request, overview, details, feature, done,
+                                 feedback, history)
         try:
             reply = self._chat(system, user)
         except OllamaUnavailable:
@@ -233,6 +252,13 @@ class Brain:
             "never include comments in the JSON; if the request is impossible or "
             "ambiguous, return an empty actions array and a clarification message.",
             "",
+            "If ONE crucial value is missing and a wrong guess would ruin the "
+            "part, you may ask ONE short question instead of guessing: add "
+            '"ask": {"question": "...", "options": ["..."], "default": <value>} '
+            "to your JSON (ALWAYS include a sensible default). Never ask "
+            "permission to act, only for missing information; when a sensible "
+            "default is obvious, use it and act instead of asking.",
+            "",
             "For fillet and chamfer you normally do NOT list edges. Omit 'edges' "
             "and optionally set 'where' to choose a group: 'all' (default), 'top', "
             "'bottom', 'vertical' or 'horizontal'. The tool reads the real geometry "
@@ -247,7 +273,15 @@ class Brain:
             "To EXTRUDE a 2D shape into a solid, first create the profile with "
             "create_sketch (it makes an object named 'Sketch'), then call extrude "
             "with target 'Sketch'. A rectangle needs width and height; a circle "
-            "needs radius. The default plane is XY.",
+            "needs radius. The default plane is XY. To make a SOLID OF REVOLUTION "
+            "(vase, pulley, knob), create_sketch the profile then revolve it: "
+            "angle defaults to 360 and axis is a letter 'X'/'Y'/'Z' (default 'Z'). "
+            "For a LOFT draw each profile with create_sketch (space them with "
+            "placement [x,y,z]) then loft with profiles [names in order]. For a "
+            "SWEEP draw the cross-section PROFILE first, then the PATH (e.g. a "
+            "polyline on a perpendicular plane), then sweep. Use shell to hollow "
+            "a solid: give the wall thickness and pick the OPEN face with where "
+            "'top'/'bottom'.",
             "",
             "To MOVE an existing object use move with 'by' [dx,dy,dz] for a "
             "relative shift (preferred) or 'to' [x,y,z] for an absolute position. "
@@ -347,6 +381,35 @@ class Brain:
             '{"target": "Box", "where": "top", "shape": "circle", "radius": 6}}, '
             '{"type": "command", "cmd": "extrude", "params": '
             '{"target": "Sketch", "distance": 4, "op": "cut"}}]}',
+            'Request: "make a hexagonal prism, radius 15, 8 mm tall"',
+            '{"actions": [{"type": "command", "cmd": "create_sketch", "params": '
+            '{"shape": "polygon", "sides": 6, "radius": 15}}, '
+            '{"type": "command", "cmd": "extrude", "params": '
+            '{"target": "Sketch", "distance": 8}}]}',
+            'Request: "loft a 40x40 square into a circle of radius 10, 30 mm '
+            'above it"',
+            '{"actions": [{"type": "command", "cmd": "create_sketch", "params": '
+            '{"shape": "rectangle", "width": 40, "height": 40}}, '
+            '{"type": "command", "cmd": "create_sketch", "params": '
+            '{"shape": "circle", "radius": 10, "placement": [0, 0, 30]}}, '
+            '{"type": "command", "cmd": "loft", "params": '
+            '{"profiles": ["Sketch", "Sketch001"]}}]}',
+            'Request: "hollow out Box with 2 mm walls, open on top" '
+            '(document has Box)',
+            '{"actions": [{"type": "command", "cmd": "shell", "params": '
+            '{"target": "Box", "thickness": 2, "where": "top"}}]}',
+            'Request: "create a cone with base radius 10 and height 25"',
+            '{"actions": [{"type": "command", "cmd": "create_cone", '
+            '"params": {"radius1": 10, "height": 25}}]}',
+            'Request: "draw a 20x10 rectangle and revolve it around the X axis"',
+            '{"actions": [{"type": "command", "cmd": "create_sketch", "params": '
+            '{"shape": "rectangle", "width": 20, "height": 10}}, '
+            '{"type": "command", "cmd": "revolve", "params": '
+            '{"target": "Sketch", "axis": "X"}}]}',
+            'Request: "drill a mounting hole in Plate" (hole size unknown and '
+            'it matters for mounting)',
+            '{"actions": [], "ask": {"question": "What diameter should the '
+            'mounting hole have?", "options": ["5", "6", "8"], "default": 6}}',
         ]
         return "\n".join(lines)
 
@@ -371,10 +434,117 @@ class Brain:
         return "\n".join(out)
 
     def _user_prompt(self, request: str, overview: Optional[dict],
-                     details: Optional[List[dict]] = None) -> str:
-        return (f"{self._overview_block(overview)}"
-                f"{self._details_block(details)}"
-                f"User request: {request}")
+                     details: Optional[List[dict]] = None,
+                     feature: Optional[str] = None,
+                     done: Optional[List[str]] = None,
+                     feedback: Optional[str] = None,
+                     history: Optional[List[str]] = None) -> str:
+        head = (f"{self._history_block(history)}{self._overview_block(overview)}"
+                f"{self._details_block(details)}")
+        if not feature:
+            return f"{head}User request: {request}"
+        # ADR 0017: agentic per-feature loop. The run-state block is a concise
+        # SUMMARY (one line per finished feature), never a transcript, so it
+        # stays within a small model's context budget.
+        lines = [f"{head}Overall user request: {request}", ""]
+        if done:
+            lines.append("Features already built (do NOT redo them):")
+            lines.extend(f"  - {d}" for d in done)
+            lines.append("")
+        if feedback:
+            lines.append(f"The previous attempt at this feature FAILED: {feedback}")
+            lines.append("Plan it differently this time.")
+            lines.append("")
+        lines.append(f"Now plan ONLY this feature, nothing else: {feature}")
+        return "\n".join(lines)
+
+    # -- feature decomposition (ADR 0017) ---------------------------------------
+
+    def decompose(self, request: str, overview: Optional[dict] = None,
+                  history: Optional[List[str]] = None) -> List[str]:
+        """
+        Ask the model to split a request into an ordered list of FEATURES
+        (ADR 0017, agentic loop). The prompt is deliberately TINY - no command
+        catalog, no long examples - so this extra inference stays cheap on a
+        small local model.
+
+        Returns a list of feature strings, or [] when the request is a single
+        operation, the model does not decompose, or anything at all fails: the
+        caller then falls back to the classic single-plan flow (graceful
+        degradation, principle 9). NEVER raises.
+        """
+        try:
+            reply = self._chat(self._decompose_system_prompt(),
+                               self._decompose_user_prompt(request, overview,
+                                                           history))
+        except Exception:
+            return []
+        feats = reply.get("features") if isinstance(reply, dict) else None
+        if not isinstance(feats, list):
+            return []
+        out = [f.strip() for f in feats if isinstance(f, str) and f.strip()]
+        # Fewer than 2 features = nothing to loop over: signal "flat flow".
+        return out if len(out) >= 2 else []
+
+    def _decompose_system_prompt(self) -> str:
+        return "\n".join([
+            "You break a CAD modelling request into an ordered list of FEATURES.",
+            "A feature is one self-contained modelling step: a base solid, a set "
+            "of holes, a pocket or boss, rounded/chamfered edges, a pattern of "
+            "copies, a move/rotation.",
+            "Keep every dimension and number from the request inside the feature "
+            "that uses it. Order the features so each builds on the previous ones.",
+            'Answer with ONE JSON object only: {"features": ["...", "..."]}',
+            "If the request is ONE simple operation (or you are unsure), answer "
+            '{"features": []} and it will be handled as a single step.',
+            "",
+            "Examples:",
+            'Request: "make a 100x60x10 plate with 4 corner holes of 6 mm and '
+            'rounded vertical edges"',
+            '{"features": ["create the base plate 100x60x10", '
+            '"drill 4 holes of 6 mm at the corners of the plate", '
+            '"round the vertical edges of the plate"]}',
+            'Request: "create a box 30x20x10"',
+            '{"features": []}',
+        ])
+
+    @staticmethod
+    def _decompose_user_prompt(request: str, overview: Optional[dict],
+                               history: Optional[List[str]] = None) -> str:
+        ids = []
+        if isinstance(overview, dict):
+            ids = [o.get("id") for o in overview.get("objects", []) or []
+                   if isinstance(o, dict) and o.get("id")]
+        ctx = f"Existing objects in the document: {', '.join(ids)}\n" if ids else ""
+        # ADR 0019: a pinch of session memory (last lines only - tiny prompt).
+        if history:
+            recent = "; ".join(str(h)[:120] for h in history[-3:])
+            ctx = f"Earlier in this session: {recent}\n{ctx}"
+        return f"{ctx}Request: {request}"
+
+    @staticmethod
+    def _history_block(history: Optional[List[str]]) -> str:
+        """
+        Render the compressed session memory (ADR 0019): one line per EARLIER
+        request of this session, oldest first, hard-capped in size (the engine
+        already keeps a sliding window; this cap is defence in depth for the
+        ctx-8192 budget). Nothing is rendered for the first request.
+        """
+        if not history:
+            return ""
+        lines = ["EARLIER IN THIS SESSION (oldest first; the document overview "
+                 "below shows the CURRENT ids):"]
+        budget = 1000  # chars, ~250 tokens: declared prompt budget of the memory
+        used = 0
+        for h in history:
+            h = str(h)[:200]
+            if used + len(h) > budget:
+                break
+            lines.append(f"  - {h}")
+            used += len(h)
+        lines.append("Pronouns like 'it' or 'that' refer to the objects made "
+                     "above, unless the request says otherwise.")
+        return "\n".join(lines) + "\n\n"
 
     def _details_block(self, details: Optional[List[dict]]) -> str:
         """
@@ -430,7 +600,20 @@ class Brain:
     # -- normalization + validation --------------------------------------------
 
     def _normalize(self, reply: Any) -> Dict[str, Any]:
-        """Validate the model reply structurally and split valid/invalid actions."""
+        """
+        Validate the model reply structurally and split valid/invalid actions.
+
+        Besides the historical keys, the plan carries an "ordered" list that
+        preserves the position of every usable action (ADR 0018):
+          {"status": "valid",   "action": {...}}
+          {"status": "fixable", "action": {...}, "missing": [...],
+           "bad_enum": {param: [allowed]}, "errors": [...]}
+        A FIXABLE action failed validation ONLY for missing required params
+        (each with a known default) and/or invalid enum values: the engine may
+        resolve it by asking the user a templated question instead of dropping
+        it. Engines/tests that ignore "ordered" keep the v0.12 behaviour
+        (fixable actions are simply not in valid_actions).
+        """
         if not isinstance(reply, dict):
             raise PlanError("the model reply is not a JSON object")
 
@@ -441,6 +624,7 @@ class Brain:
         clarification = reply.get("clarification") or None
         notes: List[str] = []
         valid: List[dict] = []
+        ordered: List[dict] = []
 
         for i, action in enumerate(actions):
             if not isinstance(action, dict):
@@ -452,13 +636,26 @@ class Brain:
                 if not isinstance(code, str) or not code.strip():
                     notes.append(f"action #{i}: python action without code, dropped")
                     continue
-                valid.append({"type": "python", "code": code,
-                              "reason": action.get("reason", "")})
+                entry = {"type": "python", "code": code,
+                         "reason": action.get("reason", "")}
+                valid.append(entry)
+                ordered.append({"status": "valid", "action": entry})
             elif atype == "command":
                 invocation = {"cmd": action.get("cmd"),
                               "params": action.get("params", {}) or {}}
                 errors = fake_brain.validate_invocation(invocation, self.catalog)
                 if fake_brain.is_blocking(errors):
+                    info = questions.classify(invocation, self.catalog)
+                    if info["fixable"]:
+                        # Do NOT drop it: the engine can ask the user (ADR 0018).
+                        ordered.append({
+                            "status": "fixable",
+                            "action": {"type": "command", **invocation},
+                            "missing": info["missing"],
+                            "bad_enum": info["bad_enum"],
+                            "errors": list(errors),
+                        })
+                        continue
                     notes.append(
                         f"action #{i} ({invocation['cmd']}): dropped, "
                         f"{'; '.join(errors)}")
@@ -466,13 +663,35 @@ class Brain:
                 if errors:  # non-blocking warnings
                     notes.append(f"action #{i} ({invocation['cmd']}): "
                                  f"{'; '.join(errors)}")
-                valid.append({"type": "command", **invocation})
+                entry = {"type": "command", **invocation}
+                valid.append(entry)
+                ordered.append({"status": "valid", "action": entry})
             else:
                 notes.append(f"action #{i}: unknown action type '{atype}', dropped")
 
         return {
             "actions": actions,
             "valid_actions": valid,
+            "ordered": ordered,
             "notes": notes,
             "clarification": clarification,
+            "ask": self._normalize_ask(reply.get("ask")),
         }
+
+    @staticmethod
+    def _normalize_ask(ask: Any) -> Optional[dict]:
+        """
+        Normalize the model's optional clarification question (ADR 0019).
+        Returns {"question", "options", "default"} or None when absent/unusable.
+        The default may be None here; the ENGINE enforces the golden rule
+        (no default = treat as a plain clarification, never a blocking wait).
+        """
+        if not isinstance(ask, dict):
+            return None
+        question = str(ask.get("question") or "").strip()
+        if not question:
+            return None
+        options = [str(o).strip() for o in (ask.get("options") or [])
+                   if str(o).strip()]
+        return {"question": question, "options": options[:6],
+                "default": ask.get("default")}

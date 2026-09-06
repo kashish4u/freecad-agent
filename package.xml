@@ -7,14 +7,16 @@
     Runs on a LOCAL model via Ollama (privacy-first, nothing leaves your
     machine) on top of an unmodified FreeCAD base (an add-on, not a fork).
     The add-on talks to a separate AI engine over a local JSON-RPC bridge; the
-    engine turns natural language into structured CAD commands (14 commands,
-    Part workbench) executed inside undoable transactions. When the vocabulary
-    is not enough it can run free Python, always shown to the user first.
-    MVP: results depend on the model, tested on Windows; macOS/Linux
+    engine turns natural language into structured CAD commands (20 commands,
+    Part workbench) executed inside undoable transactions. It can build a WHOLE
+    part described in one paragraph (feature by feature), ask when a crucial
+    value is missing (with a proposed default), and remember the session. When
+    the vocabulary is not enough it can run free Python, always shown to the
+    user first. MVP: results depend on the model, tested on Windows; macOS/Linux
     experimental. Structured commands work without Ollama.
   </description>
-  <version>0.12.0</version>
-  <date>2026-07-04</date>
+  <version>0.13.0</version>
+  <date>2026-09-05</date>
   <maintainer email="nasdomak@users.noreply.github.com">Marco Ascani</maintainer>
   <license file="LICENSE">LGPL-2.1-or-later</license>
   <icon>addon/ai_copilot/ui/icon.svg</icon>

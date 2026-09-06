@@ -23,7 +23,7 @@ from __future__ import annotations
 from typing import List
 
 from ._common import resolve_object
-from .create_sketch import draw_profile
+from .create_sketch import draw_profile, SHAPES
 
 
 def sketch_on_face(doc, params: dict) -> List:
@@ -32,8 +32,8 @@ def sketch_on_face(doc, params: dict) -> List:
 
     target = resolve_object(doc, params["target"])
     shape = str(params.get("shape", "")).strip().lower()
-    if shape not in ("rectangle", "circle"):
-        raise ValueError("shape must be 'rectangle' or 'circle'")
+    if shape not in SHAPES:
+        raise ValueError(f"shape must be one of: {', '.join(SHAPES)}")
 
     face_ref = _resolve_face(target, params)
 

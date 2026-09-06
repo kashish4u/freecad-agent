@@ -2,8 +2,8 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/freecad-agent/shared/protocol.schema.json",
   "title": "Bridge Protocol (add-on <-> engine)",
-  "description": "Messages of the bridge between the FreeCAD add-on and the AI engine. Transport: local TCP socket on 127.0.0.1 (ephemeral port, token handshake). Message format: JSON-RPC 2.0. Bidirectional communication: the engine can call methods on the add-on (e.g. run command, give perception) and vice versa (e.g. notify a user event).",
-  "version": "0.1.0",
+  "description": "Messages of the bridge between the FreeCAD add-on and the AI engine. Transport: local TCP socket on 127.0.0.1 (ephemeral port, token handshake). Message format: JSON-RPC 2.0. Bidirectional communication: the engine can call methods on the add-on (e.g. run command, give perception) and vice versa (e.g. notify a user event). v0.2.0 (ADR 0018) is ADDITIVE over v0.1.0: it only adds user.question / user.answer; a 0.1.0 peer keeps working (the engine degrades to silent defaults + log when the add-on does not know user.question).",
+  "version": "0.2.0",
 
   "$defs": {
     "jsonrpcRequest": {
@@ -90,6 +90,19 @@
         "params": { "transaction_id": "string" },
         "result": { "ok": "boolean" }
       },
+      "user.question": {
+        "description": "ADR 0018 (protocol 0.2.0): ask the user ONE templated clarification question. NOT a permission request (principle 4 intact): every question carries a default. The add-on shows a non-modal card in the panel and returns {ok:true} IMMEDIATELY (the user may take minutes); the answer arrives later via 'user.answer' (addon->engine) carrying the same question_id. The engine's wait is a cancellable checkpoint (ADR 0008) with a safety timeout, after which it proceeds with the declared default. An add-on that does not know this method (protocol 0.1.0) makes the engine degrade to silent defaults + log.",
+        "params": {
+          "question_id": "string (engine-generated, echoed by user.answer)",
+          "task_id": "string (the natural-language task this belongs to)",
+          "cmd": "string (the command the question is about)",
+          "param": "string (the parameter the question is about)",
+          "question": "string (human-readable text, includes the proposed default)",
+          "options": "array of strings (clickable choices; for enums, the allowed values)",
+          "default": "the proposed default value (number|string)"
+        },
+        "result": { "ok": "boolean (true = the card is shown; the answer comes asynchronously)" }
+      },
       "ui.confirm": {
         "description": "Ask for human confirmation ONLY for irreversible actions (e.g. overwriting a file).",
         "params": { "message": "string", "danger": "boolean" },
@@ -114,8 +127,17 @@
         "result": { "$ref": "commands.schema.json#/$defs/commandResult" }
       },
       "user.cancel": {
-        "description": "The user interrupts the running task.",
+        "description": "The user interrupts the running task. Also closes any pending question: the run stops at the next checkpoint (including the question wait itself).",
         "params": { "task_id": "string" },
+        "result": { "ok": "boolean" }
+      },
+      "user.answer": {
+        "description": "ADR 0018 (protocol 0.2.0): the user's answer to a pending 'user.question'. Either a value (from a clicked option or the free text field, coerced by the engine to the parameter type) or use_default=true ('Use default' button). An unknown/expired question_id returns ok=false and is harmless.",
+        "params": {
+          "question_id": "string (from user.question)",
+          "value": "the chosen value (string|number, optional)",
+          "use_default": "boolean (true = apply the proposed default)"
+        },
         "result": { "ok": "boolean" }
       }
     },

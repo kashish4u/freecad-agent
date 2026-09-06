@@ -161,6 +161,18 @@ class _GeomCircle:
         self.Radius = float(radius)
 
 
+class _GeomArc:
+    """Toy ArcOfCircle: built from a circle + two angles (radians), like the
+    Part.ArcOfCircle(Part.Circle(...), a1, a2) constructor our sketches use."""
+    kind = "arc"
+
+    def __init__(self, circle, angle1: float, angle2: float):
+        self.Center = circle.Center
+        self.Radius = circle.Radius
+        self.FirstParameter = float(angle1)
+        self.LastParameter = float(angle2)
+
+
 class _Constraint:
     def __init__(self, *args):
         self.args = args
@@ -291,6 +303,62 @@ class Document:
         if t == "Part::Cylinder":
             R = float(getattr(o, "Radius", 1)); H = float(getattr(o, "Height", 1))
             return Shape(3, 3, 2, BoundBox(-R, -R, 0, R, R, H))
+        if t == "Part::Cone":
+            R = max(float(getattr(o, "Radius1", 1)), float(getattr(o, "Radius2", 0)))
+            H = float(getattr(o, "Height", 1))
+            return Shape(3, 3, 2, BoundBox(-R, -R, 0, R, R, H))
+        if t == "Part::Sphere":
+            R = float(getattr(o, "Radius", 1))
+            return Shape(1, 1, 1, BoundBox(-R, -R, -R, R, R, R))
+        if t == "Part::Torus":
+            R1 = float(getattr(o, "Radius1", 2)); R2 = float(getattr(o, "Radius2", 1))
+            E = R1 + R2
+            return Shape(1, 2, 1, BoundBox(-E, -E, -R2, E, E, R2))
+        if t == "Part::Loft":
+            # Union of the sections' bounding boxes (toy approximation).
+            sections = getattr(o, "Sections", None) or []
+            boxes = [s.Shape.BoundBox for s in sections
+                     if getattr(s, "Shape", None) is not None]
+            if boxes:
+                bb = BoundBox(boxes[0].XMin, boxes[0].YMin, boxes[0].ZMin,
+                              boxes[0].XMax, boxes[0].YMax, boxes[0].ZMax)
+                for b in boxes[1:]:
+                    bb.add(b)
+                return Shape(3, 3, 2, bb)
+            return Shape(3, 3, 2)
+        if t == "Part::Sweep":
+            sections = list(getattr(o, "Sections", None) or [])
+            spine = getattr(o, "Spine", None)
+            if isinstance(spine, (list, tuple)) and spine:
+                sections.append(spine[0])
+            boxes = [s.Shape.BoundBox for s in sections
+                     if getattr(s, "Shape", None) is not None]
+            if boxes:
+                bb = BoundBox(boxes[0].XMin, boxes[0].YMin, boxes[0].ZMin,
+                              boxes[0].XMax, boxes[0].YMax, boxes[0].ZMax)
+                for b in boxes[1:]:
+                    bb.add(b)
+                return Shape(3, 6, 4, bb)
+            return Shape(3, 6, 4)
+        if t == "Part::Thickness":
+            # Inherit the shelled solid's bbox (outer dimensions unchanged).
+            faces = getattr(o, "Faces", None)
+            base = faces[0] if isinstance(faces, (list, tuple)) and faces else None
+            if base is not None and getattr(base, "Shape", None) is not None:
+                bb = base.Shape.BoundBox
+                return Shape(6, 12, 8, BoundBox(bb.XMin, bb.YMin, bb.ZMin,
+                                                bb.XMax, bb.YMax, bb.ZMax))
+            return Shape(6, 12, 8)
+        if t == "Part::Revolution":
+            # Inherit the Source profile's bbox (toy approximation: the tests
+            # only need counts + a plausible box, not real swept geometry).
+            src = getattr(o, "Source", None)
+            if src is not None and getattr(src, "Shape", None) is not None:
+                bb = src.Shape.BoundBox
+                ext = max(abs(bb.XMin), abs(bb.XMax), abs(bb.YMin), abs(bb.YMax), 1.0)
+                return Shape(3, 3, 2, BoundBox(-ext, -ext, bb.ZMin, ext, ext,
+                                               max(bb.ZMax, bb.ZMin + 1.0)))
+            return Shape(3, 3, 2)
         if t == "Sketcher::SketchObject":
             return self._sketch_shape(o)
         if t == "Part::Feature":
@@ -328,7 +396,7 @@ class Document:
             if kind == "line":
                 pts.append(g.StartPoint)
                 pts.append(g.EndPoint)
-            elif kind == "circle":
+            elif kind in ("circle", "arc"):
                 c, r = g.Center, g.Radius
                 pts.append(Vector(c.x - r, c.y - r, c.z))
                 pts.append(Vector(c.x + r, c.y + r, c.z))
@@ -390,6 +458,7 @@ def _make_part_module() -> types.ModuleType:
     mod = types.ModuleType("Part")
     mod.LineSegment = _GeomLine
     mod.Circle = _GeomCircle
+    mod.ArcOfCircle = _GeomArc
     return mod
 
 

@@ -19,10 +19,17 @@ nor worry about threading.
 
 from .create_box import create_box
 from .create_cylinder import create_cylinder
+from .create_cone import create_cone
+from .create_sphere import create_sphere
+from .create_torus import create_torus
 from .create_sketch import create_sketch
 from .sketch_on_face import sketch_on_face
 from .drill_hole import drill_hole
 from .extrude import extrude
+from .revolve import revolve
+from .loft import loft
+from .sweep import sweep
+from .shell import shell
 from .chamfer import chamfer
 from .fillet import fillet
 from .boolean import boolean
@@ -32,7 +39,8 @@ from .mirror import mirror
 from .array import array
 
 __all__ = [
-    "create_box", "create_cylinder", "create_sketch", "sketch_on_face",
-    "drill_hole", "extrude", "chamfer", "fillet", "boolean", "move", "rotate",
-    "mirror", "array",
+    "create_box", "create_cylinder", "create_cone", "create_sphere",
+    "create_torus", "create_sketch", "sketch_on_face", "drill_hole", "extrude",
+    "revolve", "loft", "sweep", "shell", "chamfer", "fillet", "boolean",
+    "move", "rotate", "mirror", "array",
 ]

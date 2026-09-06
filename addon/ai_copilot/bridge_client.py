@@ -55,7 +55,7 @@ from bridge import (  # type: ignore
     PROTOCOL_VERSION,
 )
 
-ADDON_VERSION = "0.12.0-phase6"
+ADDON_VERSION = "0.13.0"
 
 
 class BridgeClient:
@@ -63,6 +63,7 @@ class BridgeClient:
                  on_state: Optional[Callable[[str], None]] = None,
                  on_status: Optional[Callable[[dict], None]] = None,
                  on_python: Optional[Callable[[str, str], None]] = None,
+                 on_question: Optional[Callable[[dict], None]] = None,
                  launcher: "EngineLauncher | None" = None,
                  accept_timeout: float = 30.0,
                  max_reconnect: int = 5, reconnect_delay: float = 2.0) -> None:
@@ -71,6 +72,9 @@ class BridgeClient:
                  run inline on the network thread (NOT safe with FreeCAD).
         on_python: called (code, reason) when the engine proposes free Python, so
                  the panel can SHOW it (transparency, principle 5) before it runs.
+        on_question: called (params of user.question) when the engine asks a
+                 clarification question (ADR 0018); the panel shows a non-modal
+                 card and later answers via send_user_answer().
         launcher: EngineLauncher used in MANAGED mode to start/stop the engine
                  process (ADR 0015). Injectable for tests; a real one by default.
         accept_timeout: seconds to wait, in managed mode, for the engine to
@@ -81,6 +85,7 @@ class BridgeClient:
         self._on_state = on_state or (lambda state: None)
         self._on_status = on_status or (lambda params: None)
         self._on_python = on_python or (lambda code, reason: None)
+        self._on_question = on_question or (lambda params: None)
         self._launcher = launcher or EngineLauncher(logger=self._log)
         self._accept_timeout = accept_timeout
         self._max_reconnect = max_reconnect
@@ -117,6 +122,18 @@ class BridgeClient:
     def _on_transaction_rollback(self, params: dict) -> dict:
         return executor.rollback(params.get("transaction_id", ""))
 
+    def _on_transaction_begin(self, params: dict) -> dict:
+        # ADR 0017: open a per-feature undo group (one Ctrl+Z per feature).
+        label = params.get("label", "feature")
+        self._log(f"transaction.begin: {label}")
+        return executor.begin_group(label)
+
+    def _on_transaction_end(self, params: dict) -> dict:
+        # ADR 0017: close the group (commit as ONE undo entry, or roll it back).
+        abort = bool(params.get("abort"))
+        self._log(f"transaction.end (abort={abort})")
+        return executor.end_group(abort)
+
     def _on_perception_overview(self, params: dict) -> dict:
         # The agent's "eyes": concise summary of the active document.
         from . import perception
@@ -137,6 +154,21 @@ class BridgeClient:
         except Exception:  # the UI must never break the bridge
             pass
         return executor.run_python(code, reason)
+
+    def _on_user_question(self, params: dict) -> dict:
+        """
+        The engine asks a clarification question (ADR 0018). Return {ok: true}
+        IMMEDIATELY (the card is non-modal; the user may take minutes); the
+        answer travels back later via send_user_answer(). The UI callback must
+        never break the bridge.
+        """
+        self._log(f"user.question [{params.get('question_id')}]: "
+                  f"{params.get('question')}")
+        try:
+            self._on_question(params)
+        except Exception:  # pragma: no cover - the UI must not break the bridge
+            return {"ok": False, "error": "the panel could not show the question"}
+        return {"ok": True}
 
     def _on_agent_status(self, params: dict) -> None:
         # Status notification from the engine: forward it to the UI.
@@ -179,6 +211,9 @@ class BridgeClient:
         peer.register("perception.overview", self._on_perception_overview)
         peer.register("perception.detail", self._on_perception_detail)
         peer.register("transaction.rollback", self._on_transaction_rollback)
+        peer.register("transaction.begin", self._on_transaction_begin)   # ADR 0017
+        peer.register("transaction.end", self._on_transaction_end)       # ADR 0017
+        peer.register("user.question", self._on_user_question)           # ADR 0018
         peer.register("agent.status", self._on_agent_status)
 
     # -- lifecycle -------------------------------------------------------------
@@ -242,6 +277,7 @@ class BridgeClient:
         return peer.call("command.request", invocation, timeout=timeout)
 
     def send_user_prompt(self, text: str, selection=None, ai_timeout=None,
+                         ask_when_unsure: bool = True,
                          timeout: "float | None" = None) -> dict:
         """
         Send a natural-language request (`user.prompt`) and BLOCK until the engine
@@ -262,6 +298,9 @@ class BridgeClient:
         params: dict = {"text": text, "selection": selection or []}
         # Always send ai_timeout (0 included) so the engine can reset a prior cap.
         params["ai_timeout"] = ai_timeout or 0
+        # ADR 0018: "Ask me when unsure". False = v0.12 behaviour (no questions,
+        # invalid actions dropped exactly as before).
+        params["ask_when_unsure"] = bool(ask_when_unsure)
         if timeout is None:
             if ai_timeout and float(ai_timeout) > 0:
                 # plan + 2 repairs (engine MAX_REPAIR_ATTEMPTS) + margin for
@@ -284,6 +323,23 @@ class BridgeClient:
         if peer is None or not self._connected.is_set():
             raise ConnectionClosed("not connected to the engine")
         return peer.call("user.cancel", {"task_id": task_id}, timeout=timeout)
+
+    def send_user_answer(self, question_id: str, value=None,
+                         use_default: bool = False, timeout: float = 10.0) -> dict:
+        """
+        Deliver the user's answer to a pending engine question (ADR 0018).
+        MUST be called from a worker thread (never the Qt main thread). The
+        engine returns immediately; ok=false for an unknown/expired question
+        (e.g. the run was cancelled or the safety timeout elapsed) is harmless.
+        """
+        peer = self._peer
+        if peer is None or not self._connected.is_set():
+            raise ConnectionClosed("not connected to the engine")
+        params: dict = {"question_id": question_id,
+                        "use_default": bool(use_default)}
+        if value is not None:
+            params["value"] = value
+        return peer.call("user.answer", params, timeout=timeout)
 
     # -- internals -------------------------------------------------------------
 

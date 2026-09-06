@@ -80,6 +80,29 @@ def run_scenario():
     assert both == {"Box": "Union", "Box_copy": "Union"}, both
     out["consumed_chaining"] = "redirects dead references to the live result"
 
+    # Consumed-object chaining via result.consumed_ids (Sess.19 fix): a pocket
+    # (extrude op=cut) swallows the OWNER body, which is NOT a command param
+    # (found via the sketch attachment). The executor reports it in consumed_ids
+    # so a LATER feature naming the old body is redirected to the pocket result.
+    pocket = {"type": "command", "cmd": "extrude",
+              "params": {"target": "Sketch", "distance": 5, "op": "cut"}}
+    rep2 = Session._record_consumed(
+        pocket, {"ok": True, "created_ids": ["Pocket"],
+                 "consumed_ids": ["Box"]}, {})
+    # both the consumed profile (param 'target') AND the owner body are mapped.
+    assert rep2.get("Sketch") == "Pocket", rep2
+    assert rep2.get("Box") == "Pocket", rep2
+    later = {"type": "command", "cmd": "drill_hole",
+             "params": {"target": "Box", "diameter": 5, "depth": 10}}
+    redirected = Session._rewrite_consumed(later, rep2)
+    assert redirected is not later and redirected["params"]["target"] == "Pocket", \
+        redirected
+    # a result WITHOUT consumed_ids behaves exactly as before (no owner mapping).
+    rep3 = Session._record_consumed(
+        pocket, {"ok": True, "created_ids": ["Pocket"]}, {})
+    assert rep3 == {"Sketch": "Pocket"}, rep3
+    out["pocket_owner_chaining"] = "pocket owner Box -> Pocket across features"
+
     # _update_created remembers the first created id and grows the known set.
     last, known2 = Session._update_created(None, known,
                                            {"ok": True, "created_ids": ["Box001"]})

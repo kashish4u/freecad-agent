@@ -109,7 +109,12 @@ def _pocket(doc, target, distance: float) -> List:
 
     # Part::Cut auto-hides its operands; hide the consumed sketch too.
     hide_object(target)
-    return [cut]
+    # A pocket CONSUMES the owner body (base_solid) into the Part::Cut, but that
+    # body is NOT one of the command's params (it was found via the sketch's
+    # attachment). Report it as a consumed id so the engine can redirect later
+    # references to the old body to this pocket result (ADR 0016 extension,
+    # closes the gap noted in Sess.13). Returning (created, consumed_ids).
+    return [cut], [getattr(base_solid, "Name", None)]
 
 
 def _require_solid(ext) -> None:

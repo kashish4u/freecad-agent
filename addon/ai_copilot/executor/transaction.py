@@ -56,3 +56,38 @@ def rollback_last(doc) -> bool:
         doc.undo()
         return True
     return False
+
+
+# -- per-feature undo groups (ADR 0017) ----------------------------------------
+# FreeCAD's app-level "active transaction" (FreeCAD.setActiveTransaction /
+# closeActiveTransaction) groups every document transaction opened while it is
+# active into ONE undo entry. The engine brackets each FEATURE of an agentic run
+# with transaction.begin / transaction.end, so Ctrl+Z undoes a whole feature and
+# a failed feature rolls back atomically. The per-action `undoable` above keeps
+# working unchanged inside a group. Must run on the GUI main thread (the bridge
+# dispatcher guarantees it). Degrades gracefully on a FreeCAD without the API.
+
+def begin_group(label: str) -> dict:
+    """Open an undo group. Returns {"ok": bool, "error": str-if-not}."""
+    try:
+        import FreeCAD
+        if not hasattr(FreeCAD, "setActiveTransaction"):
+            return {"ok": False,
+                    "error": "this FreeCAD has no setActiveTransaction"}
+        FreeCAD.setActiveTransaction(f"FreeCAD Agent: {label}")
+        return {"ok": True}
+    except Exception as exc:  # never let a group problem break the bridge
+        return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+
+
+def end_group(abort: bool = False) -> dict:
+    """Close the undo group: commit it as one undo entry, or roll it back."""
+    try:
+        import FreeCAD
+        if not hasattr(FreeCAD, "closeActiveTransaction"):
+            return {"ok": False,
+                    "error": "this FreeCAD has no closeActiveTransaction"}
+        FreeCAD.closeActiveTransaction(bool(abort))
+        return {"ok": True}
+    except Exception as exc:
+        return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}

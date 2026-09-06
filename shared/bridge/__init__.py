@@ -32,4 +32,8 @@ __all__ = [
     "discovery",
 ]
 
-PROTOCOL_VERSION = "0.1.0"
+# 0.2.0 (ADR 0018): ADDITIVE only - new methods user.question (engine->addon)
+# and user.answer (addon->engine). No existing method changed, so a 0.1.0 peer
+# still works: the engine detects the missing method and degrades to silent
+# defaults + log. The handshake logs (never rejects) a version mismatch.
+PROTOCOL_VERSION = "0.2.0"

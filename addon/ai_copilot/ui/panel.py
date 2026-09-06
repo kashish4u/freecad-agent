@@ -78,6 +78,7 @@ class AgentPanel(QtWidgets.QDockWidget):
     sig_result = QtCore.Signal(object)
     sig_python = QtCore.Signal(object)   # (code, reason) proposed free Python
     sig_nl_result = QtCore.Signal(object)  # outcome of a natural-language request
+    sig_question = QtCore.Signal(object)   # user.question payload (ADR 0018)
 
     def __init__(self, parent=None) -> None:
         super().__init__("FreeCAD Agent", parent)
@@ -130,11 +131,14 @@ class AgentPanel(QtWidgets.QDockWidget):
         self._state_label = QtWidgets.QLabel("Disconnected")
         status_row.addWidget(self._dot)
         status_row.addWidget(self._state_label, 1)
-        # Privacy indicator placeholder (inactive in Phase 1).
-        self._privacy_label = QtWidgets.QLabel("Privacy: local")
-        self._privacy_label.setToolTip("Where the AI runs. 'local' = your machine "
-                                       "(Ollama), nothing leaves your computer.")
-        self._privacy_label.setStyleSheet("color:#0f9d58; font-weight:bold;")
+        # Fixed "Local AI" badge (Phase 7 decision): the project is local-only
+        # (Ollama), so the old dynamic local/remote indicator became a constant.
+        self._privacy_label = QtWidgets.QLabel("Local AI")
+        self._privacy_label.setToolTip("The AI runs entirely on your machine "
+                                       "(Ollama). Nothing leaves your computer.")
+        self._privacy_label.setStyleSheet(
+            "color:#0f9d58; font-weight:bold; border:1px solid #0f9d58;"
+            " border-radius:8px; padding:1px 8px;")
         status_row.addWidget(self._privacy_label)
         layout.addLayout(status_row)
 
@@ -208,6 +212,19 @@ class AgentPanel(QtWidgets.QDockWidget):
         timeout_row.addWidget(self._timeout_spin)
         timeout_row.addStretch(1)
         layout.addLayout(timeout_row)
+
+        # "Ask me when unsure" (ADR 0018), ON by default: the agent may ask a
+        # short clarification question (with a proposed default) when a value
+        # is missing or ambiguous. OFF = the v0.12 behaviour, no questions.
+        self._ask_check = QtWidgets.QCheckBox("Ask me when unsure")
+        self._ask_check.setChecked(True)
+        self._ask_check.setStyleSheet("color:#666; font-size:11px;")
+        self._ask_check.setToolTip(
+            "On (default): when a value is missing or ambiguous the agent asks "
+            "you a short question with a proposed default (max 3 per request; "
+            "a card appears above the log - never a pop-up).\n"
+            "Off: no questions, invalid steps are skipped as in v0.12.")
+        layout.addWidget(self._ask_check)
 
         self._btn_ask = QtWidgets.QPushButton("Ask the agent")
         self._btn_ask.setEnabled(False)
@@ -309,6 +326,50 @@ class AgentPanel(QtWidgets.QDockWidget):
         log_layout = QtWidgets.QVBoxLayout(log_pane)
         log_layout.setContentsMargins(8, 4, 8, 8)
         log_layout.setSpacing(4)
+
+        # --- Question card (ADR 0018): NON-modal, lives above the log. Shown
+        # when the engine asks a clarification; the run is paused at a
+        # cancellable checkpoint until the user clicks an option, types a value,
+        # accepts the default, or cancels the run.
+        self._question_card = QtWidgets.QFrame()
+        self._question_card.setStyleSheet(
+            "QFrame { background:#e8f0fe; border:1px solid #4285f4;"
+            " border-radius:6px; }")
+        qcard_layout = QtWidgets.QVBoxLayout(self._question_card)
+        qcard_layout.setContentsMargins(8, 6, 8, 6)
+        qcard_layout.setSpacing(4)
+        self._question_label = QtWidgets.QLabel("")
+        self._question_label.setWordWrap(True)
+        self._question_label.setStyleSheet("color:#174ea6; border:none;")
+        qcard_layout.addWidget(self._question_label)
+        self._question_options_row = QtWidgets.QWidget()
+        self._question_options_row.setStyleSheet("border:none;")
+        self._question_options_layout = QtWidgets.QHBoxLayout(
+            self._question_options_row)
+        self._question_options_layout.setContentsMargins(0, 0, 0, 0)
+        self._question_options_layout.setSpacing(4)
+        qcard_layout.addWidget(self._question_options_row)
+        answer_row = QtWidgets.QWidget()
+        answer_row.setStyleSheet("border:none;")
+        answer_layout = QtWidgets.QHBoxLayout(answer_row)
+        answer_layout.setContentsMargins(0, 0, 0, 0)
+        answer_layout.setSpacing(4)
+        self._question_field = QtWidgets.QLineEdit()
+        self._question_field.setPlaceholderText("…or type your own value")
+        self._question_field.returnPressed.connect(self._answer_free_text)
+        self._btn_answer = QtWidgets.QPushButton("Answer")
+        self._btn_answer.clicked.connect(self._answer_free_text)
+        self._btn_use_default = QtWidgets.QPushButton("Use default")
+        self._btn_use_default.clicked.connect(
+            lambda: self._send_answer(use_default=True))
+        answer_layout.addWidget(self._question_field, 1)
+        answer_layout.addWidget(self._btn_answer)
+        answer_layout.addWidget(self._btn_use_default)
+        qcard_layout.addWidget(answer_row)
+        self._question_card.setVisible(False)
+        self._current_question_id = None
+        log_layout.addWidget(self._question_card)
+
         log_layout.addWidget(QtWidgets.QLabel("<b>Log</b>"))
         self._log_view = QtWidgets.QPlainTextEdit()
         self._log_view.setReadOnly(True)
@@ -347,6 +408,7 @@ class AgentPanel(QtWidgets.QDockWidget):
         self.sig_result.connect(self._apply_result)
         self.sig_python.connect(self._apply_python)
         self.sig_nl_result.connect(self._apply_nl_result)
+        self.sig_question.connect(self._apply_question)
 
     # -- composer: dynamic fields for the selected command ---------------------
 
@@ -404,6 +466,7 @@ class AgentPanel(QtWidgets.QDockWidget):
             on_state=lambda s: self.sig_state.emit(str(s)),
             on_status=lambda p: self.sig_status.emit(p),
             on_python=lambda code, reason: self.sig_python.emit((code, reason)),
+            on_question=lambda p: self.sig_question.emit(p),
         )
         # Global references: keep the GC from destroying client/invoker.
         try:
@@ -486,9 +549,12 @@ class AgentPanel(QtWidgets.QDockWidget):
         ai_timeout = self._timeout_spin.value() if self._limit_check.isChecked() else 0
         self.log(f"You: {text}")
 
+        ask_when_unsure = self._ask_check.isChecked()
+
         def worker():
             try:
-                result = self._client.send_user_prompt(text, ai_timeout=ai_timeout)
+                result = self._client.send_user_prompt(
+                    text, ai_timeout=ai_timeout, ask_when_unsure=ask_when_unsure)
             except Exception as exc:  # network/timeout/not connected
                 result = {"accepted": False, "error": f"{type(exc).__name__}: {exc}"}
             self.sig_nl_result.emit(result)
@@ -513,6 +579,7 @@ class AgentPanel(QtWidgets.QDockWidget):
             self._busy_row.setVisible(False)
             self._btn_cancel.setEnabled(False)
             self._current_task_id = None
+            self._hide_question_card()   # the run is over: no pending question
 
     def _on_busy_tick(self) -> None:
         """Once per second while a request runs: update elapsed time + slow hint."""
@@ -533,6 +600,7 @@ class AgentPanel(QtWidgets.QDockWidget):
         self._btn_cancel.setEnabled(False)
         self._btn_cancel.setText("Cancelling…")
         self._append_log("  · cancel requested…")
+        self._hide_question_card()   # cancel also closes a pending question
 
         def worker(tid=task_id):
             try:
@@ -618,13 +686,8 @@ class AgentPanel(QtWidgets.QDockWidget):
                 self._current_task_id = task_id
                 if params.get("phase") != "cancelling":
                     self._btn_cancel.setEnabled(True)
-            privacy = params.get("privacy")
-            if privacy == "local":
-                self._privacy_label.setText("Privacy: local")
-                self._privacy_label.setStyleSheet("color:#0f9d58; font-weight:bold;")
-            elif privacy == "remote":
-                self._privacy_label.setText("Privacy: REMOTE")
-                self._privacy_label.setStyleSheet("color:#db4437; font-weight:bold;")
+            # The "Local AI" badge is FIXED (local-only project, Phase 7): the
+            # old dynamic local/remote switch is gone on purpose.
 
     def _apply_result(self, result) -> None:
         self._btn_run.setEnabled(self._client is not None and self._client.is_connected())
@@ -651,6 +714,55 @@ class AgentPanel(QtWidgets.QDockWidget):
             header += f" — {reason}"
         self._py_banner.setText(f"{header}\n\n{code}\n\n(inside an undoable "
                                 f"transaction — Ctrl+Z reverts it)")
+
+    # -- question card (ADR 0018) ----------------------------------------------
+
+    def _apply_question(self, params) -> None:
+        """Show the engine's clarification question as a non-modal card."""
+        if not isinstance(params, dict):
+            return
+        self._current_question_id = params.get("question_id")
+        self._question_label.setText(str(params.get("question", "")))
+        # Rebuild the clickable options.
+        while self._question_options_layout.count():
+            item = self._question_options_layout.takeAt(0)
+            w = item.widget()
+            if w is not None:
+                w.deleteLater()
+        for opt in (params.get("options") or [])[:6]:
+            btn = QtWidgets.QPushButton(str(opt))
+            btn.clicked.connect(lambda _=False, v=opt: self._send_answer(value=v))
+            self._question_options_layout.addWidget(btn)
+        self._question_options_layout.addStretch(1)
+        self._question_field.clear()
+        self._question_card.setVisible(True)
+        self._append_log(f"  ? {params.get('question')}")
+
+    def _answer_free_text(self) -> None:
+        text = self._question_field.text().strip()
+        if text:
+            self._send_answer(value=text)
+
+    def _send_answer(self, value=None, use_default: bool = False) -> None:
+        """Send the user's answer to the engine (from a worker thread)."""
+        qid = self._current_question_id
+        self._hide_question_card()
+        if self._client is None or not self._client.is_connected() or not qid:
+            return
+        shown = "default" if use_default else value
+        self._append_log(f"  · your answer: {shown}")
+
+        def worker(q=qid, v=value, d=use_default):
+            try:
+                self._client.send_user_answer(q, value=v, use_default=d)
+            except Exception as exc:  # best-effort: the run has its own timeout
+                self.sig_log.emit(f"  · answer failed: {type(exc).__name__}: {exc}")
+
+        threading.Thread(target=worker, name="user-answer", daemon=True).start()
+
+    def _hide_question_card(self) -> None:
+        self._current_question_id = None
+        self._question_card.setVisible(False)
 
     def _apply_nl_result(self, result) -> None:
         """Outcome of a natural-language request (user.prompt)."""

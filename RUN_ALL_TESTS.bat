@@ -25,27 +25,32 @@ echo.
 
 set "FAIL=0"
 
-call :runtest "1/21 Bridge basics"            tests\test_bridge_core.py
-call :runtest "2/21 Command validation"       tests\test_validation.py
-call :runtest "3/21 Structured round-trip"    tests\test_roundtrip.py
-call :runtest "4/21 Planning brain"           tests\test_brain.py
-call :runtest "5/21 Ollama client"            tests\test_ollama_client.py
-call :runtest "6/21 Expanded vocabulary"      tests\test_vocabulary_exec.py
-call :runtest "7/21 Document perception"      tests\test_perception.py
-call :runtest "8/21 Full natural-language"    tests\test_user_prompt_roundtrip.py
-call :runtest "9/21 Edge selection"           tests\test_edge_selection.py
-call :runtest "10/21 Ollama auto-start"       tests\test_ollama_launch.py
-call :runtest "11/21 Cancellation"            tests\test_cancel.py
-call :runtest "12/21 AI timeout config"       tests\test_timeout_config.py
-call :runtest "13/21 Create sketch"           tests\test_create_sketch.py
-call :runtest "14/21 Sketch-extrude link"     tests\test_extrude_link.py
-call :runtest "15/21 Move and rotate"         tests\test_transform.py
-call :runtest "16/21 Id-chaining helpers"     tests\test_idchain.py
-call :runtest "17/21 Id-chaining guard"       tests\test_idchain_guard.py
-call :runtest "18/21 Mirror and array"        tests\test_duplicate.py
-call :runtest "19/21 Sketch on face + pocket" tests\test_sketch_on_face.py
-call :runtest "20/21 Topology flip"           tests\test_flip.py
-call :runtest "21/21 Engine launcher"         tests\test_launcher.py
+call :runtest "1/26 Bridge basics"            tests\test_bridge_core.py
+call :runtest "2/26 Command validation"       tests\test_validation.py
+call :runtest "3/26 Structured round-trip"    tests\test_roundtrip.py
+call :runtest "4/26 Planning brain"           tests\test_brain.py
+call :runtest "5/26 Ollama client"            tests\test_ollama_client.py
+call :runtest "6/26 Expanded vocabulary"      tests\test_vocabulary_exec.py
+call :runtest "7/26 Document perception"      tests\test_perception.py
+call :runtest "8/26 Full natural-language"    tests\test_user_prompt_roundtrip.py
+call :runtest "9/26 Edge selection"           tests\test_edge_selection.py
+call :runtest "10/26 Ollama auto-start"       tests\test_ollama_launch.py
+call :runtest "11/26 Cancellation"            tests\test_cancel.py
+call :runtest "12/26 AI timeout config"       tests\test_timeout_config.py
+call :runtest "13/26 Create sketch"           tests\test_create_sketch.py
+call :runtest "14/26 Sketch-extrude link"     tests\test_extrude_link.py
+call :runtest "15/26 Move and rotate"         tests\test_transform.py
+call :runtest "16/26 Id-chaining helpers"     tests\test_idchain.py
+call :runtest "17/26 Id-chaining guard"       tests\test_idchain_guard.py
+call :runtest "18/26 Mirror and array"        tests\test_duplicate.py
+call :runtest "19/26 Sketch on face + pocket" tests\test_sketch_on_face.py
+call :runtest "20/26 Topology flip"           tests\test_flip.py
+call :runtest "21/26 Engine launcher"         tests\test_launcher.py
+call :runtest "22/26 Agentic feature loop"    tests\test_feature_loop.py
+call :runtest "23/26 Questions (ADR 0018)"    tests\test_questions.py
+call :runtest "24/26 Model ask + memory"      tests\test_session_memory.py
+call :runtest "25/26 Primitives + revolve"    tests\test_primitives.py
+call :runtest "26/26 Vocab B (loft/sweep/shell)" tests\test_vocab_b.py
 
 echo  ============================================================
 if "%FAIL%"=="0" (

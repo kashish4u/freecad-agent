@@ -5,9 +5,10 @@ English and it performs real modeling actions inside FreeCAD — from a single o
 whole multi-step component. It runs on a **local** language model via Ollama (nothing leaves
 your machine) and sits on top of an **unmodified** FreeCAD: it is an add-on, not a fork.
 
-> **Status: MVP (v0.12.0).** It works end-to-end and has been validated on real multi-step
-> parts, but it is an early, non-commercial hobby/research project. Read the
-> [Limits](#limits) section before using it — honesty first.
+> **Status: MVP (v0.13.0).** It works end-to-end and has been validated on real multi-step
+> parts: it now builds a whole part described in one paragraph, asks when a crucial value is
+> missing, and remembers the session. It is still an early, non-commercial hobby/research
+> project. Read the [Limits](#limits) section before using it — honesty first.
 
 **[▶ Watch the demo](https://dai.ly/xamziuq)** *(2½ minutes, wait times trimmed — also available as
 [mp4 in this repo](docs/media/demo.mp4))*
@@ -21,8 +22,10 @@ You write, for example:
 and the agent perceives the document, plans the steps with the local model, and executes them
 as structured CAD commands inside **undoable transactions** — `Ctrl+Z` reverts any action.
 
-The structured vocabulary today covers **14 commands** on the Part workbench: create box,
-create cylinder, create sketch, sketch on face, drill hole, extrude, pocket, boolean
+The structured vocabulary today covers **20 commands** on the Part workbench: create box,
+create cylinder, create cone (and truncated cone), create sphere, create torus, create sketch
+(rectangle, circle, regular polygon, rounded slot, closed polyline), sketch on face, extrude,
+pocket, revolve, loft, sweep, shell (hollow a solid), drill hole, boolean
 (union/difference/intersection), fillet, chamfer, move, rotate, mirror, array (linear and
 polar). Fragile decisions (which edges to fillet, which face to sketch on, which object a
 follow-up step refers to) are resolved by the executor from the real geometry, not guessed by
@@ -35,6 +38,35 @@ transaction.
 Everything starts from inside FreeCAD: open the panel, click **Connect**, and the local AI
 engine starts by itself in the background. No terminal, no separate installs — the engine is
 pure Python standard library and runs on the interpreter shipped with FreeCAD.
+
+## Build a whole part from one paragraph
+
+Describe the part; the agent splits it into features (base, pockets, holes, rounds…), builds
+them **one at a time re-reading the real geometry in between**, and rolls back + replans a
+failed feature before moving on. Each feature is one undo step (`Ctrl+Z`).
+
+    Make a mounting bracket: a base plate 60x40x10, cut a rectangular pocket 30x20 and 5 mm
+    deep into its top face, drill two 5 mm holes at positions [10, 20] and [50, 20], and
+    chamfer the vertical edges by 1.
+
+Small local models have honest limits: keep it under ~6–8 features and give explicit
+dimensions/positions (see [Limits](#limits)).
+
+## The agent asks when unsure
+
+If a crucial value is missing ("drill a hole" — which diameter?), a card appears in the panel
+with a proposed default: click an option, type a value, or accept the default. Never a
+permission prompt, never a pop-up, at most 3 questions per request. Turn the **"Ask me when
+unsure"** checkbox off for the old silent behaviour. The questions are generated
+deterministically by the engine, so they work with **any** model; a capable model can also ask
+its own.
+
+## Session memory
+
+The engine keeps a compressed summary of what you asked earlier in the session
+("created Cylinder…"), so a follow-up like "now drill a hole in its centre" resolves to the
+right object. The memory lives in **RAM only** and dies with the engine — nothing is stored on
+disk.
 
 ## Requirements
 
@@ -86,10 +118,12 @@ This is an MVP and the limits are stated openly — please read them:
   in the wild: support is experimental and feedback is very welcome.
 - **Ollama is required for natural language** (separate, free install). Structured commands
   from the panel work without it.
-- **14 structured commands** (Part workbench). Anything else goes through the free-Python
+- **20 structured commands** (Part workbench). Anything else goes through the free-Python
   channel, always shown to you before execution.
 - **Phrases that require the model to compute coordinates** (e.g. "holes equally distributed
-  on a radius") are beyond small models: give explicit positions instead.
+  on a radius") are beyond small models: give explicit positions, or use the polar `array`.
+- **Beyond ~6–8 features per request** a small model drifts; and whether the model itself
+  raises a question is model-dependent (the engine's deterministic questions always work).
 - **Not for production or safety-critical parts.** It is an assistant you supervise: always
   review the result.
 - **MVP:** no cloud adapters yet, no guarantees; APIs and behavior may change.
@@ -106,14 +140,14 @@ JSON-RPC 2.0):
 3. The model — external and interchangeable: today a local model via Ollama's HTTP API.
 
 Shared contracts (command vocabulary, context format, bridge protocol) live in `shared/` as
-JSON Schema files. Design decisions are recorded in `docs/adr/` (ADR 0001-0016).
+JSON Schema files. Design decisions are recorded in `docs/adr/` (ADR 0001-0021).
 
-Privacy: no telemetry, no cloud calls, nothing leaves your machine. The panel shows a
-local/remote indicator so you always know where inference happens.
+Privacy: no telemetry, no cloud calls, nothing leaves your machine. The panel carries a fixed
+**Local AI** badge so you always know inference happens on your machine.
 
 ## Running the tests
 
-`RUN_ALL_TESTS.bat` (Windows) runs the whole headless suite — 21 test modules, no FreeCAD or
+`RUN_ALL_TESTS.bat` (Windows) runs the whole headless suite — 26 test modules, no FreeCAD or
 Ollama needed. On any OS: run the `tests/test_*.py` files with any Python 3.10+.
 
 ## Feedback and contributing

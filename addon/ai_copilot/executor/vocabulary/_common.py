@@ -25,6 +25,20 @@ def bounding_box(obj):
     return getattr(shape, "BoundBox", None)
 
 
+def apply_placement(obj, placement) -> None:
+    """
+    Apply an optional [x,y,z] origin from a command's `placement` parameter.
+    Shared by the create_* primitives (Phase 7 additions use it; the older
+    primitives keep their inline version to avoid touching validated code).
+    No-op when placement is missing or too short.
+    """
+    import FreeCAD
+    if placement and len(placement) >= 3:
+        x, y, z = (float(placement[0]), float(placement[1]), float(placement[2]))
+        obj.Placement = FreeCAD.Placement(FreeCAD.Vector(x, y, z),
+                                          FreeCAD.Rotation())
+
+
 def hide_object(obj) -> None:
     """
     Hide an object in the 3D view (best-effort, no-op without a GUI).
@@ -150,6 +164,55 @@ def parse_edge_indices(edges: List[str]) -> List[int]:
     if not edges:
         raise ValueError("at least one edge id is required")
     return [parse_edge_index(e) for e in edges]
+
+
+# --- executor-side FACE selection (Phase 7, shell) ----------------------------
+# Same philosophy as the edge selector below (ADR 0006) and sketch_on_face
+# (ADR 0014): the model says WHERE ('top'/'bottom'), the executor reads the real
+# geometry and finds the face - never an index guessed by the model
+# (principle 7). sketch_on_face keeps its historical local resolver (validated
+# in real FreeCAD); new commands use this shared one.
+
+def select_face_ref(target, where: str = "top", explicit=None) -> str:
+    """
+    Return a face reference like 'Face3' on `target`: the explicit id if given,
+    otherwise the planar face whose normal points along +Z ('top', highest) or
+    -Z ('bottom', lowest). Raises ValueError with a clear message otherwise.
+    """
+    if explicit:
+        return str(explicit)
+    where = str(where or "top").strip().lower()
+    if where not in ("top", "bottom"):
+        raise ValueError("'where' must be 'top' or 'bottom' (or pass an "
+                         "explicit 'face' id)")
+    shape = getattr(target, "Shape", None)
+    if shape is None:
+        raise ValueError(f"target '{getattr(target, 'Name', '?')}' has no "
+                         "shape yet; recompute the document first")
+    faces = list(getattr(shape, "Faces", []) or [])
+    if not faces:
+        raise ValueError(f"target '{getattr(target, 'Name', '?')}' has no faces")
+    best_idx = None
+    best_z = None
+    for i, f in enumerate(faces, start=1):
+        try:
+            n = f.normalAt(0, 0)
+        except Exception:
+            continue
+        bb = getattr(f, "BoundBox", None)
+        if where == "top" and n.z > 0.9:
+            z = bb.ZMax if bb is not None else 0.0
+            if best_z is None or z > best_z:
+                best_z, best_idx = z, i
+        elif where == "bottom" and n.z < -0.9:
+            z = bb.ZMin if bb is not None else 0.0
+            if best_z is None or z < best_z:
+                best_z, best_idx = z, i
+    if best_idx is None:
+        raise ValueError(f"could not find a flat '{where}' face on "
+                         f"'{getattr(target, 'Name', '?')}'; pass an explicit "
+                         "'face' id")
+    return f"Face{best_idx}"
 
 
 # --- executor-side edge selection (ADR 0006) ---------------------------------

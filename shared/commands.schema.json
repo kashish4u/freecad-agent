@@ -3,7 +3,7 @@
   "$id": "https://github.com/freecad-agent/shared/commands.schema.json",
   "title": "Structured Vocabulary",
   "description": "The structured vocabulary as neutral DATA (principle 5). The engine reads this file to know which commands exist and with which parameters (for tool calling); the add-on provides the IMPLEMENTATION in addon/ai_copilot/executor/vocabulary/. Adding a command = one entry here + one function in the executor. This is v0.1: a minimal catalog. Units are mm and degrees unless stated otherwise.",
-  "version": "0.5.0",
+  "version": "0.7.0",
 
   "$defs": {
     "commandInvocation": {
@@ -55,6 +55,55 @@
         }
       }
     },
+    "create_cone": {
+      "summary": "Create a cone (or a truncated cone). radius1 is the base radius; radius2 is the TOP radius (default 0 = pointed cone; give both for a frustum).",
+      "params": {
+        "type": "object",
+        "required": ["radius1", "height"],
+        "properties": {
+          "radius1": { "type": "number", "minimum": 0, "description": "base radius in mm" },
+          "radius2": { "type": "number", "minimum": 0, "description": "top radius in mm (default 0 = pointed tip)" },
+          "height": { "type": "number", "minimum": 0 },
+          "placement": { "type": "array", "items": { "type": "number" }, "description": "[x,y,z] origin, optional" }
+        }
+      }
+    },
+    "create_sphere": {
+      "summary": "Create a sphere.",
+      "params": {
+        "type": "object",
+        "required": ["radius"],
+        "properties": {
+          "radius": { "type": "number", "minimum": 0 },
+          "placement": { "type": "array", "items": { "type": "number" }, "description": "[x,y,z] centre, optional" }
+        }
+      }
+    },
+    "create_torus": {
+      "summary": "Create a torus (a ring/donut). radius1 is the ring radius (centre of the tube to the axis); radius2 is the tube radius (must be smaller).",
+      "params": {
+        "type": "object",
+        "required": ["radius1", "radius2"],
+        "properties": {
+          "radius1": { "type": "number", "minimum": 0, "description": "ring radius in mm (axis to tube centre)" },
+          "radius2": { "type": "number", "minimum": 0, "description": "tube radius in mm" },
+          "placement": { "type": "array", "items": { "type": "number" }, "description": "[x,y,z] centre, optional" }
+        }
+      }
+    },
+    "revolve": {
+      "summary": "Revolve a sketch/profile around an axis to make a solid of revolution (e.g. a vase, a pulley). The target is usually the 'Sketch' made by create_sketch. angle defaults to 360 (full revolution); axis is 'X', 'Y' or 'Z' (default 'Z') passing through 'base' (default the origin). Give axes as letters, never as raw vectors.",
+      "params": {
+        "type": "object",
+        "required": ["target"],
+        "properties": {
+          "target": { "type": "string", "description": "id of the sketch/profile to revolve (e.g. 'Sketch')" },
+          "angle": { "type": "number", "description": "revolution angle in degrees (default 360)" },
+          "axis": { "type": "string", "enum": ["X", "Y", "Z"], "description": "revolution axis (default Z)" },
+          "base": { "type": "array", "items": { "type": "number" }, "description": "[x,y,z] point the axis passes through, optional (default: the origin)" }
+        }
+      }
+    },
     "drill_hole": {
       "summary": "Drill a cylindrical hole into an existing body.",
       "params": {
@@ -69,17 +118,58 @@
       }
     },
     "create_sketch": {
-      "summary": "Create a 2D sketch (a real Sketcher sketch) to be turned into a solid with 'extrude'. Choose a 'shape' ('rectangle' or 'circle') on a standard 'plane'. The new object is named 'Sketch'; pass that name as the 'target' of 'extrude'. A rectangle needs width and height; a circle needs radius.",
+      "summary": "Create a 2D sketch (a real Sketcher sketch) to be turned into a solid with 'extrude', 'revolve', 'loft' or 'sweep'. Choose a 'shape' on a standard 'plane'. The new object is named 'Sketch'. Shapes: 'rectangle' (width+height), 'circle' (radius), 'polygon' (sides+radius), 'slot' = rounded slot (length+width), 'polyline' = closed wire through 'points'.",
       "params": {
         "type": "object",
         "required": ["shape"],
         "properties": {
-          "shape": { "type": "string", "enum": ["rectangle", "circle"], "description": "profile to draw" },
+          "shape": { "type": "string", "enum": ["rectangle", "circle", "polygon", "slot", "polyline"], "description": "profile to draw" },
           "plane": { "type": "string", "enum": ["XY", "XZ", "YZ"], "description": "reference plane the sketch lies on (default XY)" },
-          "width": { "type": "number", "minimum": 0, "description": "rectangle width (required when shape='rectangle')" },
+          "width": { "type": "number", "minimum": 0, "description": "rectangle/slot width (required for those shapes)" },
           "height": { "type": "number", "minimum": 0, "description": "rectangle height (required when shape='rectangle')" },
-          "radius": { "type": "number", "minimum": 0, "description": "circle radius (required when shape='circle')" },
-          "placement": { "type": "array", "items": { "type": "number" }, "description": "[x,y,z] origin offset, optional" }
+          "radius": { "type": "number", "minimum": 0, "description": "circle radius, or polygon circumradius" },
+          "sides": { "type": "integer", "minimum": 3, "description": "polygon: number of sides (required when shape='polygon')" },
+          "length": { "type": "number", "minimum": 0, "description": "slot: OVERALL length, must be > width (required when shape='slot')" },
+          "points": { "type": "array", "items": { "type": "array" }, "description": "polyline: at least 3 [x,y] pairs in mm; the wire closes automatically. A third number [x,y,bulge] makes the edge to the NEXT point an arc bulging by that height (positive = left)" },
+          "placement": { "type": "array", "items": { "type": "number" }, "description": "[x,y,z] origin offset, optional (use it to space loft profiles apart)" }
+        }
+      }
+    },
+    "loft": {
+      "summary": "Loft a solid through 2+ profiles in order (e.g. a square that morphs into a circle). Draw each profile first with create_sketch (space them apart with 'placement'), then pass their names in 'profiles'; the tool links the real sketches automatically.",
+      "params": {
+        "type": "object",
+        "required": ["profiles"],
+        "properties": {
+          "profiles": { "type": "array", "items": { "type": "string" }, "description": "ordered list of at least 2 sketch/profile ids" },
+          "solid": { "type": "boolean", "description": "make a solid (default true); false = a hollow surface" },
+          "ruled": { "type": "boolean", "description": "straight-line transitions between profiles (default false = smooth)" }
+        }
+      }
+    },
+    "sweep": {
+      "summary": "Sweep a profile along a path (e.g. a circle along a curved polyline = a pipe). Draw the PROFILE first, then the PATH (often a polyline sketch on a perpendicular plane), then sweep; the tool links the real sketches automatically.",
+      "params": {
+        "type": "object",
+        "required": ["profile", "path"],
+        "properties": {
+          "profile": { "type": "string", "description": "id of the cross-section sketch" },
+          "path": { "type": "string", "description": "id of the sketch/wire to sweep along" },
+          "solid": { "type": "boolean", "description": "make a solid (default true)" },
+          "frenet": { "type": "boolean", "description": "profile follows the path's curvature (default true)" }
+        }
+      }
+    },
+    "shell": {
+      "summary": "Hollow a solid into a thin-walled shell, leaving one face OPEN (like a box without a lid). Pick the open face with 'where' ('top' or 'bottom'); the tool resolves the real face itself. thickness = wall thickness in mm; the walls grow inward, outer dimensions stay.",
+      "params": {
+        "type": "object",
+        "required": ["target", "thickness"],
+        "properties": {
+          "target": { "type": "string", "description": "id of the solid to hollow" },
+          "thickness": { "type": "number", "minimum": 0, "description": "wall thickness in mm" },
+          "where": { "type": "string", "enum": ["top", "bottom"], "description": "which face is left open (default top)" },
+          "face": { "type": "string", "description": "OPTIONAL explicit face id like 'Face3'; prefer 'where'" }
         }
       }
     },
@@ -186,10 +276,13 @@
           "target": { "type": "string", "description": "id of the object that owns the face" },
           "where": { "type": "string", "enum": ["top", "bottom"], "description": "pick the face by position; the tool finds the real face index (default top)" },
           "face": { "type": "string", "description": "OPTIONAL explicit face id like 'Face6'; prefer 'where' and let the tool resolve it" },
-          "shape": { "type": "string", "enum": ["rectangle", "circle"], "description": "profile to draw on the face" },
-          "width": { "type": "number", "minimum": 0, "description": "rectangle width (required when shape='rectangle')" },
+          "shape": { "type": "string", "enum": ["rectangle", "circle", "polygon", "slot", "polyline"], "description": "profile to draw on the face" },
+          "width": { "type": "number", "minimum": 0, "description": "rectangle/slot width (required for those shapes)" },
           "height": { "type": "number", "minimum": 0, "description": "rectangle height (required when shape='rectangle')" },
-          "radius": { "type": "number", "minimum": 0, "description": "circle radius (required when shape='circle')" },
+          "radius": { "type": "number", "minimum": 0, "description": "circle radius, or polygon circumradius" },
+          "sides": { "type": "integer", "minimum": 3, "description": "polygon: number of sides (required when shape='polygon')" },
+          "length": { "type": "number", "minimum": 0, "description": "slot: OVERALL length, must be > width (required when shape='slot')" },
+          "points": { "type": "array", "items": { "type": "array" }, "description": "polyline: at least 3 [x,y] pairs (see create_sketch)" },
           "offset": { "type": "number", "description": "optional gap between the face and the sketch, mm" }
         }
       }

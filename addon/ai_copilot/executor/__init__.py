@@ -19,11 +19,13 @@ from __future__ import annotations
 
 from typing import Callable, Dict, List
 
-from .transaction import undoable, rollback_last
+from .transaction import undoable, rollback_last, begin_group, end_group  # noqa: F401
+# (begin_group/end_group re-exported for bridge_client: ADR 0017 undo groups)
 from .python_exec import run_python  # noqa: F401  (re-exported: executor.run_python)
 from .vocabulary import (
-    create_box, create_cylinder, create_sketch, sketch_on_face, drill_hole,
-    extrude, chamfer, fillet, boolean, move, rotate, mirror, array,
+    create_box, create_cylinder, create_cone, create_sphere, create_torus,
+    create_sketch, sketch_on_face, drill_hole, extrude, revolve,
+    loft, sweep, shell, chamfer, fillet, boolean, move, rotate, mirror, array,
 )
 
 # Registry: command name (as in commands.schema.json) -> vocabulary function.
@@ -32,10 +34,17 @@ from .vocabulary import (
 REGISTRY: Dict[str, Callable[[object, dict], List]] = {
     "create_box": create_box,
     "create_cylinder": create_cylinder,
+    "create_cone": create_cone,
+    "create_sphere": create_sphere,
+    "create_torus": create_torus,
     "create_sketch": create_sketch,
     "sketch_on_face": sketch_on_face,
     "drill_hole": drill_hole,
     "extrude": extrude,
+    "revolve": revolve,
+    "loft": loft,
+    "sweep": sweep,
+    "shell": shell,
     "chamfer": chamfer,
     "fillet": fillet,
     "boolean": boolean,
@@ -90,7 +99,17 @@ def execute(invocation: dict) -> dict:
 
     try:
         with undoable(doc, cmd) as (tx_id, _tx_label):
-            created = fn(doc, params) or []
+            ret = fn(doc, params)
+            # A command usually returns the list of created objects. It MAY also
+            # return (created, consumed_ids): ids of pre-existing objects it
+            # absorbed that are NOT command params (e.g. a pocket's owner body),
+            # so the engine can redirect later references (ADR 0016).
+            if isinstance(ret, tuple):
+                created = ret[0] or []
+                consumed_ids = [c for c in (ret[1] or []) if c]
+            else:
+                created = ret or []
+                consumed_ids = []
             recompute_ok = _recompute_ok(doc, created)
             if not recompute_ok:
                 # Invalid geometry: fail the transaction -> rollback.
@@ -99,6 +118,7 @@ def execute(invocation: dict) -> dict:
             "ok": True,
             "transaction_id": tx_id,
             "created_ids": [obj.Name for obj in created],
+            "consumed_ids": consumed_ids,
             "recompute_ok": recompute_ok,
         }
     except Exception as exc:

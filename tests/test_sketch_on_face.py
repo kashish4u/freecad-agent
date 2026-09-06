@@ -82,6 +82,10 @@ def run_scenario():
         cut = doc.getObject(r["created_ids"][0])
         assert cut.TypeId == "Part::Cut", f"a pocket must be a Part::Cut, got {cut.TypeId}"
         assert cut.Base.Name == box_id, "the pocket must cut from the owner body"
+        # Sess.19 fix: the pocket must REPORT the consumed owner so the engine can
+        # redirect later features that still name the old body (ADR 0016 gap).
+        assert r.get("consumed_ids") == [box_id], \
+            f"pocket must report the consumed owner body: {r.get('consumed_ids')}"
         details["pocket"] = r["created_ids"]
 
         # 5) graceful failures.
