@@ -12,11 +12,12 @@ from __future__ import annotations
 from typing import List
 
 from ._common import apply_placement
+from ._sizes import resolve_size, baseline_for
 
 
 def create_sphere(doc, params: dict) -> List:
     """Create a sphere in document `doc`."""
-    radius = float(params["radius"])
+    radius = resolve_size(params["radius"], baseline_for(doc))
     if radius <= 0:
         raise ValueError("radius must be > 0")
 

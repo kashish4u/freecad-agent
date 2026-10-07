@@ -21,12 +21,15 @@ from __future__ import annotations
 from typing import List
 
 from ._common import resolve_object, select_face_ref, hide_object
+from ._sizes import resolve_size, baseline_for
 
 
 def shell(doc, params: dict) -> List:
     """Hollow a solid, leaving the chosen face open."""
     target = resolve_object(doc, params["target"])
-    thickness = float(params.get("thickness", 0) or 0)
+    # A "thick"/"thin" wall scales to the body being hollowed; units stay absolute.
+    baseline = baseline_for(doc, target)
+    thickness = resolve_size(params.get("thickness", 0), baseline)
     if thickness <= 0:
         raise ValueError("thickness must be > 0 (the wall thickness in mm)")
 

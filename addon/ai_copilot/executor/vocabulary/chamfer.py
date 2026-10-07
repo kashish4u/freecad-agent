@@ -24,12 +24,14 @@ from typing import List
 from ._common import (
     resolve_object, parse_edge_indices, select_edge_indices, hide_object,
 )
+from ._sizes import resolve_size, baseline_for
 
 
 def chamfer(doc, params: dict) -> List:
     """Apply a chamfer to the chosen edges of an existing body."""
     target = resolve_object(doc, params["target"])
-    size = float(params["size"])
+    baseline = baseline_for(doc, target)
+    size = resolve_size(params["size"], baseline)
     if size <= 0:
         raise ValueError("chamfer size must be > 0")
 

@@ -23,6 +23,7 @@ from __future__ import annotations
 from typing import List
 
 from ._common import resolve_object
+from ._sizes import baseline_for
 from .create_sketch import draw_profile, SHAPES
 
 
@@ -63,7 +64,10 @@ def sketch_on_face(doc, params: dict) -> List:
     except Exception:
         pass
     origin = _face_centre_local(target, face_ref, sketch)
-    draw_profile(sketch, shape, params, origin=origin, centered=True)
+    # Size an adjective against the body this sketch will grow out of (or cut).
+    baseline = baseline_for(doc, target)
+    draw_profile(sketch, shape, params, origin=origin, centered=True,
+                 baseline=baseline)
     return [sketch]
 
 

@@ -26,6 +26,7 @@ from __future__ import annotations
 from typing import List
 
 from ._common import resolve_object, bounding_box
+from ._sizes import resolve_size, baseline_for
 
 
 def drill_hole(doc, params: dict) -> List:
@@ -33,8 +34,10 @@ def drill_hole(doc, params: dict) -> List:
     import FreeCAD  # lazy import: available only inside FreeCAD.
 
     target = resolve_object(doc, params["target"])
-    diameter = float(params["diameter"])
-    depth = float(params["depth"])
+    # A "wide" or "deep" hole scales to the body it goes into; units stay absolute.
+    baseline = baseline_for(doc, target)
+    diameter = resolve_size(params["diameter"], baseline)
+    depth = resolve_size(params["depth"], baseline)
     if diameter <= 0 or depth <= 0:
         raise ValueError("diameter and depth must be > 0")
 

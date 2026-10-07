@@ -16,12 +16,14 @@ from __future__ import annotations
 from typing import List
 
 from ._common import apply_placement
+from ._sizes import resolve_size, baseline_for
 
 
 def create_torus(doc, params: dict) -> List:
     """Create a torus (ring/donut) in document `doc`."""
-    radius1 = float(params["radius1"])
-    radius2 = float(params["radius2"])
+    baseline = baseline_for(doc)
+    radius1 = resolve_size(params["radius1"], baseline)
+    radius2 = resolve_size(params["radius2"], baseline)
     if radius1 <= 0 or radius2 <= 0:
         raise ValueError("radius1 and radius2 must be > 0")
     if radius2 >= radius1:

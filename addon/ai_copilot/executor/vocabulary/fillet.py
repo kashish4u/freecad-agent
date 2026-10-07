@@ -25,12 +25,16 @@ from typing import List
 from ._common import (
     resolve_object, parse_edge_indices, select_edge_indices, hide_object,
 )
+from ._sizes import resolve_size, baseline_for
 
 
 def fillet(doc, params: dict) -> List:
     """Apply a fillet (rounding) to the chosen edges of an existing body."""
     target = resolve_object(doc, params["target"])
-    radius = float(params["radius"])
+    # Scale an adjective fillet to the body it rounds ("small" on a big block is
+    # bigger than a "small" fillet on a tiny part); units stay absolute.
+    baseline = baseline_for(doc, target)
+    radius = resolve_size(params["radius"], baseline)
     if radius <= 0:
         raise ValueError("fillet radius must be > 0")
 

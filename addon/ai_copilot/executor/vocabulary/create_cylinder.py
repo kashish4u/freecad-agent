@@ -13,13 +13,16 @@ from __future__ import annotations
 
 from typing import List
 
+from ._sizes import resolve_size, baseline_for
+
 
 def create_cylinder(doc, params: dict) -> List:
     """Create a cylinder in document `doc`."""
     import FreeCAD  # lazy import: available only inside FreeCAD.
 
-    radius = float(params["radius"])
-    height = float(params["height"])
+    baseline = baseline_for(doc)
+    radius = resolve_size(params["radius"], baseline)
+    height = resolve_size(params["height"], baseline)
     if radius <= 0 or height <= 0:
         raise ValueError("radius and height must be > 0")
 

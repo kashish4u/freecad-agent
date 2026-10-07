@@ -47,6 +47,8 @@ from __future__ import annotations
 
 from typing import List
 
+from ._sizes import resolve_size, baseline_for
+
 # Standard-plane orientation for the sketch. Each entry rotates the sketch's local
 # XY plane onto the requested global plane, expressed as (axis, angle_degrees) for
 # FreeCAD.Rotation. XY is the identity. The sketch then extrudes along its own
@@ -60,7 +62,8 @@ _PLANE_ROTATIONS = {
 
 
 def draw_profile(sketch, shape: str, params: dict,
-                 origin=(0.0, 0.0), centered: bool = False) -> None:
+                 origin=(0.0, 0.0), centered: bool = False,
+                 baseline=None) -> None:
     """
     Draw the requested 2D profile into an EXISTING sketch, in its local plane
     (z = 0). Shared by create_sketch (sketch on a standard plane) and
@@ -83,8 +86,8 @@ def draw_profile(sketch, shape: str, params: dict,
     ox, oy = float(origin[0]), float(origin[1])
 
     if shape == "rectangle":
-        width = float(params.get("width", 0) or 0)
-        height = float(params.get("height", 0) or 0)
+        width = resolve_size(params.get("width", 0), baseline)
+        height = resolve_size(params.get("height", 0), baseline)
         if width <= 0 or height <= 0:
             raise ValueError("a rectangle needs width > 0 and height > 0")
         # Bottom-left corner: at `origin`, or offset so the rectangle is centred.
@@ -105,16 +108,16 @@ def draw_profile(sketch, shape: str, params: dict,
         sketch.addConstraint(Sketcher.Constraint("Coincident", 2, 2, 3, 1))
         sketch.addConstraint(Sketcher.Constraint("Coincident", 3, 2, 0, 1))
     elif shape == "circle":
-        radius = float(params.get("radius", 0) or 0)
+        radius = resolve_size(params.get("radius", 0), baseline)
         if radius <= 0:
             raise ValueError("a circle needs radius > 0")
         centre = FreeCAD.Vector(ox, oy, 0.0)
         normal = FreeCAD.Vector(0.0, 0.0, 1.0)  # local plane normal
         sketch.addGeometry(Part.Circle(centre, normal, radius), False)
     elif shape == "polygon":
-        _draw_polygon(sketch, params, ox, oy)
+        _draw_polygon(sketch, params, ox, oy, baseline)
     elif shape == "slot":
-        _draw_slot(sketch, params, ox, oy)
+        _draw_slot(sketch, params, ox, oy, baseline)
     elif shape == "polyline":
         _draw_polyline(sketch, params, ox, oy, centered)
     elif shape == "lozenge":
@@ -143,7 +146,7 @@ def _close_loop(sketch, n_geoms: int, first_index: int) -> None:
         sketch.addConstraint(Sketcher.Constraint("Coincident", a, 2, b, 1))
 
 
-def _draw_polygon(sketch, params: dict, ox: float, oy: float) -> None:
+def _draw_polygon(sketch, params: dict, ox: float, oy: float, baseline=None) -> None:
     """A regular polygon with `sides` edges inscribed in circumradius `radius`,
     centred on the origin point (a polygon is inherently centred)."""
     import math
@@ -151,7 +154,7 @@ def _draw_polygon(sketch, params: dict, ox: float, oy: float) -> None:
     import Part
 
     sides = int(params.get("sides", 0) or 0)
-    radius = float(params.get("radius", 0) or 0)
+    radius = resolve_size(params.get("radius", 0), baseline)
     if sides < 3:
         raise ValueError("a polygon needs sides >= 3")
     if radius <= 0:
@@ -170,15 +173,16 @@ def _draw_polygon(sketch, params: dict, ox: float, oy: float) -> None:
     _close_loop(sketch, sides, first)
 
 
-def _draw_slot(sketch, params: dict, ox: float, oy: float) -> None:
+def _draw_slot(sketch, params: dict, ox: float, oy: float,
+               baseline=None) -> None:
     """A rounded slot (asola) centred on the origin point: overall `length`
     along local X, `width` across; two straight edges + two semicircle arcs."""
     import math
     import FreeCAD
     import Part
 
-    length = float(params.get("length", 0) or 0)
-    width = float(params.get("width", 0) or 0)
+    length = resolve_size(params.get("length", 0), baseline)
+    width = resolve_size(params.get("width", 0), baseline)
     if length <= 0 or width <= 0:
         raise ValueError("a slot needs length > 0 and width > 0")
     if length <= width:
@@ -632,7 +636,10 @@ def create_sketch(doc, params: dict) -> List:
                                 float(placement[2]))
     sketch.Placement = FreeCAD.Placement(origin, rotation)
 
-    draw_profile(sketch, shape, params)
+    # Scale an adjective size against the largest object already here (or a default);
+    # a standalone sketch has no body to size against, so baseline_for(doc) is used.
+    baseline = baseline_for(doc)
+    draw_profile(sketch, shape, params, baseline=baseline)
     # Auto closed-check: refuse an open profile here, before it is returned to
     # the model (and later extruded into an impossible solid).
     _validate_closed(sketch)

@@ -22,13 +22,16 @@ from __future__ import annotations
 from typing import List
 
 from ._common import resolve_object, hide_object
+from ._sizes import resolve_size, baseline_for
 from .create_sketch import _validate_closed
 
 
 def extrude(doc, params: dict) -> List:
     """Extrude a sketch/profile into a solid, or cut a pocket with op='cut'."""
     target = resolve_object(doc, params["target"])
-    distance = float(params["distance"])
+    # A "long"/"deep" extrude scales to the body it grows out of (or the attached
+    # body for a pocket); units stay absolute. A negative number is kept for sign.
+    distance = resolve_size(params["distance"], baseline_for(doc, target))
     if distance == 0:
         raise ValueError("distance must be non-zero")
     op = str(params.get("op", "add")).strip().lower()

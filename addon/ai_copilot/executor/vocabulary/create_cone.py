@@ -14,13 +14,15 @@ from __future__ import annotations
 from typing import List
 
 from ._common import apply_placement
+from ._sizes import resolve_size, baseline_for
 
 
 def create_cone(doc, params: dict) -> List:
     """Create a cone (or truncated cone) in document `doc`."""
-    radius1 = float(params["radius1"])
-    radius2 = float(params.get("radius2", 0.0))
-    height = float(params["height"])
+    baseline = baseline_for(doc)
+    radius1 = resolve_size(params["radius1"], baseline)
+    radius2 = resolve_size(params.get("radius2", 0.0), baseline)
+    height = resolve_size(params["height"], baseline)
     if radius1 <= 0 or height <= 0:
         raise ValueError("radius1 and height must be > 0")
     if radius2 < 0:
