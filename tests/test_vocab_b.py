@@ -64,7 +64,8 @@ def run_scenario():
             assert n in cat.names(), f"{n} missing from the schema"
         shapes = cat.spec("create_sketch")["params"]["properties"]["shape"]["enum"]
         assert set(shapes) == {"rectangle", "circle", "polygon", "slot",
-                               "polyline"}, shapes
+                               "polyline", "lozenge", "angle", "l", "t",
+                               "tube", "rtube"}, shapes
         details["contract"] = f"{len(cat.names())} commands aligned"
 
         # 1) polygon: hexagon = 6 line segments.

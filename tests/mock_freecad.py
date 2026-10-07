@@ -257,6 +257,10 @@ class DocumentObject:
         return len(self._geometry) - 1
 
     def addConstraint(self, constraint) -> int:
+        """Record a constraint (FreeCAD returns 0) so closed-check can read it."""
+        if not hasattr(self, "_constraints"):
+            self._constraints = []
+        self._constraints.append(constraint)
         return 0
 
 

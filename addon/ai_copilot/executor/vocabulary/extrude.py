@@ -22,6 +22,7 @@ from __future__ import annotations
 from typing import List
 
 from ._common import resolve_object, hide_object
+from .create_sketch import _validate_closed
 
 
 def extrude(doc, params: dict) -> List:
@@ -50,6 +51,11 @@ def extrude(doc, params: dict) -> List:
         doc.recompute()
     except Exception:
         pass
+    # Defensive re-check: create_sketch already validated the profile, but a
+    # target may arrive via another path. Confirm it is a single closed wire
+    # before we commit to a solid (principle 7). Skipped for non-sketch targets.
+    if hasattr(target, "_geometry"):
+        _validate_closed(target)
     _require_solid(ext)
     # Hide the consumed profile so the sketch lines do not show through the solid
     # (Part::Extrusion does not auto-hide its base via the data API).

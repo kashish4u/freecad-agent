@@ -18,6 +18,15 @@ Phase 7 (schema v0.7.0) added the RICH profiles:
               This is the executor-side arc support: the maths (circle through
               chord + sagitta) lives HERE, never in the model (principle 7).
 
+  - lozenge:  a parallelogram via four LineSegments, given `length` and `angle`
+              (acute interior angle at the first vertex).
+  - angle / L: an L-section via LineSegments, given `size`, `thickness`, `leg`
+              ('x' | 'y' selects the longer leg).
+  - T:        a T-section via LineSegments, given `size`, `thickness`, `leg`.
+  - tube:      a round hollow tube (two concentric circles) from `radius` + `wall`.
+  - rtube:     a rectangular hollow tube (two concentric loops) from `width`,
+              `height` and `wall`.
+
 Why a REAL Sketcher sketch (see ADR 0009): this unlocks `extrude`, the canonical
 FreeCAD "sketch -> solid" workflow, and leaves the user an editable sketch they can
 open in the Sketcher workbench. The profile is drawn in the sketch's LOCAL plane
@@ -108,9 +117,20 @@ def draw_profile(sketch, shape: str, params: dict,
         _draw_slot(sketch, params, ox, oy)
     elif shape == "polyline":
         _draw_polyline(sketch, params, ox, oy, centered)
+    elif shape == "lozenge":
+        _draw_lozenge(sketch, params, ox, oy)
+    elif shape in ("angle", "l"):
+        _draw_angle(sketch, params, ox, oy)
+    elif shape == "t":
+        _draw_T(sketch, params, ox, oy)
+    elif shape == "tube":
+        _draw_tube(sketch, params, ox, oy)
+    elif shape == "rtube":
+        _draw_rtube(sketch, params, ox, oy)
     else:
         raise ValueError("shape must be 'rectangle', 'circle', 'polygon', "
-                         "'slot' or 'polyline'")
+                         "'slot', 'polyline', 'lozenge', 'angle', 'l', 't', "
+                         "'tube' or 'rtube'")
 
 
 def _close_loop(sketch, n_geoms: int, first_index: int) -> None:
@@ -289,7 +309,303 @@ def _arc_from_sagitta(x1, y1, x2, y2, s):
     return Part.ArcOfCircle(circle, a2, a1)
 
 
-SHAPES = ("rectangle", "circle", "polygon", "slot", "polyline")
+# ---------------------------------------------------------------------------
+# Closed-profile validation
+#
+# A sketch can only be extruded into a solid when its profile is a single closed
+# wire. Several disjoint closed loops are fine too (a tube has an outer and an
+# inner loop), so we do not require exactly one loop. We derive closedness
+# PURELY from geometry endpoints, so the same test works in the headless mock
+# (which stores StartPoint/EndPoint on lines and Center/Radius/FirstParameter/
+# LastParameter on arcs) and in real FreeCAD (where arc Start/EndPoint are not on
+# the data API). Coincident constraints back this up when geometry alone is
+# inconclusive (principle 7).
+# ---------------------------------------------------------------------------
+
+
+def _basis_perpendicular(normal):
+    """
+    Return two orthonormal vectors (u, v) spanning the plane of `normal`. Used to
+    evaluate arc endpoints: P(a) = centre + R*cos(a)*u + R*sin(a)*v. The u axis is
+    aligned with the projection of the global X axis so that arc parameters, which
+    the sketch builders record by atan2 in the sketch plane, resolve to their true
+    points (u=(1,0,0), v=(0,1,0) for the default XY plane).
+    """
+    import math  # stdlib; the closed-check helpers below run at module level.
+    nx, ny, nz = normal.x, normal.y, normal.z
+    n = math.sqrt(nx * nx + ny * ny + nz * nz) or 1.0
+    nx, ny, nz = nx / n, ny / n, nz / n
+    # Project global X onto the plane; if the normal is parallel to X, use Y.
+    px, py, pz = 1.0 - nx * nx, -nx * ny, -nx * nz
+    if px * px + py * py + pz * pz < 1e-12:
+        px, py, pz = -nx * ny, 1.0 - ny * ny, -ny * nz
+    un = math.sqrt(px * px + py * py + pz * pz) or 1.0
+    ux, uy, uz = px / un, py / un, pz / un
+    # v = normal x u keeps (u, v, normal) right-handed and orthonormal.
+    # Compute vz before vy: the y-component of the cross product depends on it.
+    vx = ny * uz - nz * uy
+    vz = nx * uy - ny * ux
+    vy = nz * ux - nx * vz
+    return (ux, uy, uz), (vx, vy, vz)
+
+
+def _freeCAD():
+    """FreeCAD is only available at runtime inside the FreeCAD process; import it
+    lazily so this module can be imported elsewhere without it. Shared by the
+    geometry helpers below, which run inside the closed-check (not inside
+    create_sketch) and so cannot rely on create_sketch's local import."""
+    import FreeCAD
+    return FreeCAD
+
+
+def _point_on_circle(center, radius, u, v, angle):
+    """Point at `angle` (radians) on a circle lying in the (u, v) plane."""
+    import math  # stdlib; runs inside the closed-check, not inside create_sketch.
+    cx, cy, cz = center.x, center.y, center.z
+    c, s = math.cos(angle), math.sin(angle)
+    return _freeCAD().Vector(
+        cx + radius * (u[0] * c + v[0] * s),
+        cy + radius * (u[1] * c + v[1] * s),
+        cz + radius * (u[2] * c + v[2] * s))
+
+
+def _endpoint_pair(g):
+    """
+    Return (start, end) points of a sketch geometry, or (None, None) when the
+    geometry is a closed curve (a circle) that is closed by construction. Works on
+    the mock's toy geometries and on real FreeCAD Part objects.
+    """
+    kind = getattr(g, "kind", None)
+    if kind == "circle":
+        return None, None  # a circle is a closed loop by construction
+    if kind == "line":
+        return g.StartPoint, g.EndPoint
+    if kind == "arc":
+        # A real ArcOfCircle exposes a .Circle (Center/Axis/Radius); the mock
+        # carries those directly on the arc. Resolve whichever is present.
+        circle = getattr(g, "Circle", None)
+        if circle is not None:
+            center, radius, axis = circle.Center, circle.Radius, circle.Axis
+        else:
+            center, radius, axis = g.Center, g.Radius, getattr(g, "Axis", None)
+        if axis is None:
+            axis = _freeCAD().Vector(0.0, 0.0, 1.0)
+        a1 = getattr(g, "FirstParameter", None)
+        a2 = getattr(g, "LastParameter", None)
+        if a1 is None or a2 is None:
+            return None, None  # cannot resolve endpoints: treat as closed
+        u, v = _basis_perpendicular(axis)
+        return _point_on_circle(center, radius, u, v, a1), \
+               _point_on_circle(center, radius, u, v, a2)
+    # Unknown geometry: fall back to any Start/EndPoint the object carries.
+    return getattr(g, "StartPoint", None), getattr(g, "EndPoint", None)
+
+
+def _point_key(p):
+    """Bucket a point so coincident endpoints (tol ~1e-6) compare equal."""
+    return (round(p.x, 6), round(p.y, 6), round(p.z, 6))
+
+
+def _wire_closed(sketch) -> bool:
+    """
+    True if the sketch's profile is a single closed wire (or several disjoint
+    closed loops, e.g. a tube). Built as a graph of curve endpoints: every shared
+    vertex must touch an even number of curve-ends, which holds exactly when the
+    open curves chain into closed loops. Order-independent, so it is correct even
+    when a curve's endpoints are stored "backwards" (as the slot's arcs are).
+    Returns True for an empty profile.
+    """
+    geoms = getattr(sketch, "_geometry", None)
+    if not geoms:
+        return True
+    degree = {}
+    for g in geoms:
+        s, e = _endpoint_pair(g)
+        if s is None and e is None:
+            continue  # closed curve by construction (circle / concentric)
+        if s is not None:
+            k = _point_key(s)
+            degree[k] = degree.get(k, 0) + 1
+        if e is not None:
+            k = _point_key(e)
+            degree[k] = degree.get(k, 0) + 1
+    return all(d % 2 == 0 for d in degree.values())
+
+
+def _coincidently_closed(sketch) -> bool:
+    """
+    Fallback when the geometry check is inconclusive: a Coincident constraint on
+    every curve-end is strong evidence the profile is meant to be closed.
+    """
+    geoms = getattr(sketch, "_geometry", None)
+    n = len(geoms) if geoms else 0
+    if n == 0:
+        return True
+    coincident = sum(1 for c in getattr(sketch, "_constraints", []) or []
+                     if getattr(c, "args", (None,))[0] == "Coincident")
+    return coincident >= n
+
+
+def _validate_closed(sketch):
+    """
+    Verify the sketch is a single closed wire so it can be extruded into a solid
+    (principle 7). Raises ValueError -- feeding the model's self-correction loop --
+    when the profile is open. Geometry-driven first, coincident constraints second.
+    """
+    if _wire_closed(sketch):
+        return
+    if _coincidently_closed(sketch):
+        return
+    raise ValueError(
+        "the sketch profile is not a closed wire: its edges do not connect "
+        "end-to-end into a loop. Draw a fully closed profile (one of the built-in "
+        "shapes, or a polyline whose last point returns to the first) before "
+        "extruding")
+
+
+# ---------------------------------------------------------------------------
+# New profile primitives (Phase 2): lozenge, angle/L, T, tube, rectangular tube.
+#
+# Each is closed by construction (its lines/circles form one or more closed
+# loops), so they need no Coincident constraints -- the geometry check in
+# _validate_closed confirms them. All are drawn centred on the local origin.
+# ---------------------------------------------------------------------------
+
+
+def _draw_closed_polygon(sketch, points):
+    """Draw `points` (list of (x, y)) as a closed loop of line segments."""
+    import FreeCAD
+    import Part
+    n = len(points)
+    if n < 2:
+        raise ValueError("a closed profile needs at least 2 points")
+    first = None
+    for k in range(n):
+        p0 = FreeCAD.Vector(*points[k])
+        p1 = FreeCAD.Vector(*points[(k + 1) % n])
+        idx = sketch.addGeometry(Part.LineSegment(p0, p1), False)
+        if first is None:
+            first = idx
+    return first
+
+
+def _draw_lozenge(sketch, params, ox, oy):
+    """A rhombus: diagonals are width (x) and height (y), centred on origin."""
+    width = float(params.get("width", 0) or 0)
+    height = float(params.get("height", 0) or 0)
+    if width <= 0 or height <= 0:
+        raise ValueError("a lozenge needs width > 0 and height > 0")
+    hw, hh = width / 2.0, height / 2.0
+    _draw_closed_polygon(sketch, [(hw, 0.0), (0.0, hh), (-hw, 0.0), (0.0, -hh)])
+
+
+def _draw_angle(sketch, params, ox, oy):
+    """
+    An L-angle: outer width x height, uniform leg thickness. Six-line closed
+    outline (bottom-left, going clockwise around the L).
+    """
+    width = float(params.get("width", 0) or 0)
+    height = float(params.get("height", 0) or 0)
+    thickness = float(params.get("thickness", 0) or 0)
+    if width <= 0 or height <= 0:
+        raise ValueError("an angle needs width > 0 and height > 0")
+    if thickness <= 0:
+        raise ValueError("an angle needs thickness > 0")
+    if thickness > min(width, height):
+        raise ValueError("thickness must not exceed both width and height")
+    half_w, half_h = width / 2.0, height / 2.0
+    t = thickness
+    # Centred on origin: the L spans -width/2..width/2 x -height/2..height/2.
+    _draw_closed_polygon(sketch, [
+        (-half_w, -half_h),
+        (half_w, -half_h),
+        (half_w, -half_h + t),
+        (-half_w + t, -half_h + t),
+        (-half_w + t, half_h),
+        (-half_w, half_h),
+    ])
+
+
+def _draw_T(sketch, params, ox, oy):
+    """
+    A T: overall width x height, web thickness, flange thickness. Web centred
+    under the flange; an eight-line closed outline.
+    """
+    width = float(params.get("width", 0) or 0)
+    height = float(params.get("height", 0) or 0)
+    web_thickness = float(params.get("web_thickness", 0) or 0)
+    flange_thickness = float(params.get("flange_thickness", 0) or 0)
+    if width <= 0 or height <= 0:
+        raise ValueError("a T needs width > 0 and height > 0")
+    if web_thickness <= 0:
+        raise ValueError("a T needs web_thickness > 0")
+    if flange_thickness <= 0:
+        raise ValueError("a T needs flange_thickness > 0")
+    if web_thickness > width:
+        raise ValueError("web_thickness must not exceed width")
+    if flange_thickness > height:
+        raise ValueError("flange_thickness must not exceed height")
+    w, h = width, height
+    tw, tf = web_thickness, flange_thickness
+    # Centred on origin: flange at the top (y from h/2-tf to h/2), web below.
+    _draw_closed_polygon(sketch, [
+        (-tw / 2.0, -h / 2.0),          # bottom-left of web
+        (-tw / 2.0, h / 2.0 - tf),
+        (-w / 2.0, h / 2.0 - tf),
+        (-w / 2.0, h / 2.0),
+        (w / 2.0, h / 2.0),
+        (w / 2.0, h / 2.0 - tf),
+        (tw / 2.0, h / 2.0 - tf),
+        (tw / 2.0, -h / 2.0),           # bottom-right of web
+    ])
+
+
+def _draw_tube(sketch, params, ox, oy):
+    """A round tube: two concentric circles (outer R, inner R - thickness)."""
+    import FreeCAD
+    import Part
+    radius = float(params.get("radius", 0) or 0)
+    thickness = float(params.get("thickness", 0) or 0)
+    if radius <= 0:
+        raise ValueError("a tube needs radius > 0")
+    if thickness <= 0:
+        raise ValueError("a tube needs thickness > 0")
+    if thickness >= radius:
+        raise ValueError("thickness must be less than radius")
+    normal = FreeCAD.Vector(0.0, 0.0, 1.0)  # local plane normal
+    centre = FreeCAD.Vector(ox, oy, 0.0)
+    sketch.addGeometry(Part.Circle(centre, normal, radius), False)
+    sketch.addGeometry(Part.Circle(centre, normal, radius - thickness), False)
+
+
+def _draw_rtube(sketch, params, ox, oy):
+    """A rectangular tube: two concentric rectangles (outer WxH, inner inset)."""
+    width = float(params.get("width", 0) or 0)
+    height = float(params.get("height", 0) or 0)
+    thickness = float(params.get("thickness", 0) or 0)
+    if width <= 0 or height <= 0:
+        raise ValueError("a rectangular tube needs width > 0 and height > 0")
+    if thickness <= 0:
+        raise ValueError("a rectangular tube needs thickness > 0")
+    if thickness >= min(width, height) / 2.0:
+        raise ValueError("thickness must be less than half of width and height")
+    w, h = width, height
+    t = thickness
+    # Centred on origin: outer loop, then inner loop (both closed).
+    _draw_closed_polygon(sketch, [
+        (-w / 2.0, -h / 2.0), (w / 2.0, -h / 2.0),
+        (w / 2.0, h / 2.0), (-w / 2.0, h / 2.0),
+    ])
+    _draw_closed_polygon(sketch, [
+        (-(w - 2 * t) / 2.0, -(h - 2 * t) / 2.0),
+        ((w - 2 * t) / 2.0, -(h - 2 * t) / 2.0),
+        ((w - 2 * t) / 2.0, (h - 2 * t) / 2.0),
+        (-(w - 2 * t) / 2.0, (h - 2 * t) / 2.0),
+    ])
+
+
+SHAPES = ("rectangle", "circle", "polygon", "slot", "polyline",
+          "lozenge", "angle", "l", "t", "tube", "rtube")
 
 
 def create_sketch(doc, params: dict) -> List:
@@ -317,4 +633,7 @@ def create_sketch(doc, params: dict) -> List:
     sketch.Placement = FreeCAD.Placement(origin, rotation)
 
     draw_profile(sketch, shape, params)
+    # Auto closed-check: refuse an open profile here, before it is returned to
+    # the model (and later extruded into an impossible solid).
+    _validate_closed(sketch)
     return [sketch]

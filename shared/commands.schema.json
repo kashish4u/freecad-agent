@@ -123,14 +123,17 @@
         "type": "object",
         "required": ["shape"],
         "properties": {
-          "shape": { "type": "string", "enum": ["rectangle", "circle", "polygon", "slot", "polyline"], "description": "profile to draw" },
+          "shape": { "type": "string", "enum": ["rectangle", "circle", "polygon", "slot", "polyline", "lozenge", "angle", "l", "t", "tube", "rtube"], "description": "profile to draw" },
           "plane": { "type": "string", "enum": ["XY", "XZ", "YZ"], "description": "reference plane the sketch lies on (default XY)" },
           "width": { "type": "number", "minimum": 0, "description": "rectangle/slot width (required for those shapes)" },
           "height": { "type": "number", "minimum": 0, "description": "rectangle height (required when shape='rectangle')" },
           "radius": { "type": "number", "minimum": 0, "description": "circle radius, or polygon circumradius" },
           "sides": { "type": "integer", "minimum": 3, "description": "polygon: number of sides (required when shape='polygon')" },
           "length": { "type": "number", "minimum": 0, "description": "slot: OVERALL length, must be > width (required when shape='slot')" },
-          "points": { "type": "array", "items": { "type": "array" }, "description": "polyline: at least 3 [x,y] pairs in mm; the wire closes automatically. A third number [x,y,bulge] makes the edge to the NEXT point an arc bulging by that height (positive = left)" },
+          "thickness": { "type": "number", "minimum": 0, "description": "profile leg/ring thickness (required when shape='angle','L','tube' or 'rtube'); for tube must be < radius" },
+           "web_thickness": { "type": "number", "minimum": 0, "description": "T: web thickness (required when shape='T'); must be <= width" },
+           "flange_thickness": { "type": "number", "minimum": 0, "description": "T: flange thickness (required when shape='T'); must be <= height" },
+           "points": { "type": "array", "items": { "type": "array" }, "description": "polyline: at least 3 [x,y] pairs in mm; the wire closes automatically. A third number [x,y,bulge] makes the edge to the NEXT point an arc bulging by that height (positive = left)" },
           "placement": { "type": "array", "items": { "type": "number" }, "description": "[x,y,z] origin offset, optional (use it to space loft profiles apart)" }
         }
       }
