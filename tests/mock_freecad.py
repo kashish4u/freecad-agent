@@ -228,6 +228,10 @@ class Shape:
         return Shape(len(self.Faces), len(self.Edges), len(self.Vertexes),
                      BoundBox(bb.XMin, bb.YMin, bb.ZMin, bb.XMax, bb.YMax, bb.ZMax))
 
+    def isValid(self) -> bool:
+        """FreeCAD Shapes report validity; a shape the mock produced is valid."""
+        return True
+
 
 class _ViewObject:
     def __init__(self):

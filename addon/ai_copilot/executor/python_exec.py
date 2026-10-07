@@ -22,6 +22,7 @@ net is the undoable transaction plus full transparency to the user.
 
 from __future__ import annotations
 
+import types
 from typing import List
 
 from .transaction import undoable
@@ -51,7 +52,76 @@ def run_python(code: str, reason: str = "") -> dict:
     doc = FreeCAD.ActiveDocument or FreeCAD.newDocument("FreeCAD_Agent")
     before = {o.Name for o in doc.Objects}
 
+    # The explicit, minimal namespace the model's snippet runs against.
     env = {"FreeCAD": FreeCAD, "App": FreeCAD, "doc": doc, "__name__": "__agent_python__"}
+
+    # FreeCAD's geometry module is `Part`. A model writing free Python very
+    # frequently guesses `import FreeCADPart` (a natural-sounding name) -- that
+    # module does not exist, so `exec` dies on the import before doing anything.
+    # Alias FreeCADPart -> Part and also expose Part directly, so either spelling
+    # works and the model's snippet can run.
+    import sys
+    try:
+        import Part
+        env["Part"] = Part
+        sys.modules.setdefault("FreeCADPart", Part)
+    except Exception:
+        pass
+
+    # Geometry compatibility shim (dumb-model / smart-kernel).
+    #
+    # The model is small and frequently guesses API names that do NOT exist in
+    # this FreeCAD's `Part` module -- e.g. Part.makeGeometryFusion,
+    # Part.GeometryFusion, Part.union(a, b), Part.cut([...]), Part.intersect([...]).
+    # The repair loop feeds each error back, but the model only varies the *wrong*
+    # guess. Rather than trust the model to know the exact API, we resolve every
+    # common guess onto the correct Shape method it MEANS, so a wrong name still
+    # yields the right geometry. Real FreeCAD functions are never shadowed
+    # (the hasattr guard installs only missing names).
+    if isinstance(Part, types.ModuleType):
+
+        def _fuse(shapes):
+            shapes = list(shapes)
+            if not shapes:
+                raise ValueError("fuse: no shapes")
+            out = shapes[0]
+            for s in shapes[1:]:
+                out = out.fuse(s)
+            return out
+
+        def _subtract(shapes):
+            shapes = list(shapes)
+            if len(shapes) < 2:
+                raise ValueError("cut: need at least 2 shapes")
+            out = shapes[0]
+            for s in shapes[1:]:
+                out = out.cut(s)
+            return out
+
+        def _common(shapes):
+            shapes = list(shapes)
+            if len(shapes) < 2:
+                raise ValueError("intersect: need at least 2 shapes")
+            out = shapes[0]
+            for s in shapes[1:]:
+                out = out.common(s)
+            return out
+
+        for _name, _fn in (
+            ("makeGeometryFusion", _fuse),
+            ("GeometryFusion", _fuse),
+            ("makeFusion", lambda a, b, t=1: _fuse([a, b])),
+            ("union", lambda a, b: _fuse([a, b])),
+            ("fuse", lambda a, b: _fuse([a, b])),
+            ("cut", _subtract),
+            ("difference", _subtract),
+            ("intersect", _common),
+            ("common", _common),
+            ("intersection", _common),
+        ):
+            if not hasattr(Part, _name):
+                setattr(Part, _name, _fn)
+
     try:
         import FreeCADGui  # optional: not present in headless mode
         env["FreeCADGui"] = FreeCADGui
