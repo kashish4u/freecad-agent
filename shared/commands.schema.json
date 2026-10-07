@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/freecad-agent/shared/commands.schema.json",
   "title": "Structured Vocabulary",
-  "description": "The structured vocabulary as neutral DATA (principle 5). The engine reads this file to know which commands exist and with which parameters (for tool calling); the add-on provides the IMPLEMENTATION in addon/ai_copilot/executor/vocabulary/. Adding a command = one entry here + one function in the executor. This is v0.1: a minimal catalog. Units are mm and degrees unless stated otherwise.",
+  "description": "The structured vocabulary as neutral DATA (principle 5). The engine reads this file to know which commands exist and with which parameters (for tool calling); the add-on provides the IMPLEMENTATION in addon/ai_copilot/executor/vocabulary/. Adding a command = one entry here + one function in the executor. This is v0.1: a minimal catalog. Units are mm and degrees unless stated otherwise. Every size parameter (length/width/height/radius/thickness/size/diameter/depth/gap/extrude distance etc.) accepts (1) a plain number = millimetres, (2) a unit string ('10mm', '2 inch', '3cm', '0.5in', '1.5in', '5 ft') which is ABSOLUTE and unscaled, or (3) a fuzzy word ('big','small','large','medium','wide','thin','thick','long','tall','tiny', optionally with 'very'/'extra'). Fuzzy words are dimension-agnostic and SCALED against the target object's own bounding-box span, or the largest existing object, or a default of 100 mm on an empty document — so a 'small' hole on a huge plate is still a small hole. Prefer an explicit number or unit whenever you can; use a word only when the exact size is not important.",
   "version": "0.8.0",
 
   "$defs": {

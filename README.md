@@ -9,7 +9,7 @@
 It runs on a **local** language model via Ollama (nothing leaves your machine) and sits on an
 **unmodified** FreeCAD: this is an add-on, not a fork.
 
-![Tests](https://img.shields.io/badge/tests-53%20passing-328a39) ![Version](https://img.shields.io/badge/version-0.13.0-2563eb) ![License](https://img.shields.io/badge/license-LGPL--2.1-4d7c51) ![Python](https://img.shields.io/badge/python-3.10%2B-0891b2) ![FreeCAD](https://img.shields.io/badge/freecad-1.1%2B-1d4ed8) ![Platform](https://img.shields.io/badge/platform-windows%20%7C%20macos%20%7C%20linux-0d9488)
+![Tests](https://img.shields.io/badge/tests-66%20passing-328a39) ![Version](https://img.shields.io/badge/version-0.13.0-2563eb) ![License](https://img.shields.io/badge/license-LGPL--2.1-4d7c51) ![Python](https://img.shields.io/badge/python-3.10%2B-0891b2) ![FreeCAD](https://img.shields.io/badge/freecad-1.1%2B-1d4ed8) ![Platform](https://img.shields.io/badge/platform-windows%20%7C%20macos%20%7C%20linux-0d9488)
 
 </div>
 
@@ -50,6 +50,27 @@ The agent has a small, structured vocabulary on the Part workbench. Each command
 
 > The vocabulary is intentionally small. If a command isn't in the list, the agent writes and
 > shows you the equivalent **Python** first.
+
+### Sizes: numbers, units, or plain words
+
+Every size accepts **three kinds of value**:
+
+- **A plain number** — interpreted as millimetres (`50`, `2.5`).
+- **A unit string** — `10mm`, `2 inch`, `3cm`, `0.5in`, `1.5in`, `5 ft`. These are **absolute**:
+  a `2 inch` bolt is 50.8 mm no matter what else is in the document.
+- **A fuzzy word** — `big`, `small`, `large`, `medium`, `wide`, `thin`, `thick`, `long`, `tall`
+  (optionally intensified: `very`, `extra`, `super`). Fuzzy words are **dimension-agnostic** and
+  scale to the geometry being acted on — a `small` hole on a huge plate is still a small hole, a
+  `thick` wall on a big part is thicker than one on a small part. On an empty document they fall
+  back to a default (`big` ≈ 100 mm, `medium` ≈ 50 mm, `small` ≈ 20 mm, `thin` ≈ 5 mm, …).
+
+Prefer an **explicit number or unit** whenever you know the size; reach for a word only when the
+exact value isn't important. A few examples:
+
+- *"A cylinder **2 inch tall**, **1 inch radius**."* → radius 25.4 mm, height 50.8 mm.
+- *"A **small** box, then a **medium** one on top of it."* → ~20 mm then ~50 mm, scaled to the
+  growing stack.
+- *"A **thick** wall around that box."* → wall thickness scaled to the box's span.
 
 ## How it works
 
@@ -111,6 +132,8 @@ Put it at `.../Mod/FreeCADAgent/`.
 
 - *"Create a box 50x50x12 and drill a 10 mm hole in the centre."*
 - *"Make a mounting bracket: a base plate 60x40x10, cut a 30x20 pocket 5 mm deep into its top face, drill two 5 mm holes at [10,20] and [50,20], and chamfer the vertical edges by 1."*
+- *"A **small** box 1 inch across, a **medium** cylinder on top, then a **thick** shell to hollow it."*
+- *"Remove the last fillet I added."*
 
 ## Privacy
 
@@ -120,7 +143,7 @@ cloud. Session memory lives only in RAM and disappears when FreeCAD closes.
 
 ## Development
 
-- **Tests:** 53 tests across 31 modules. Run them on Windows with
+- **Tests:** 66 tests across 33 modules. Run them on Windows with
   [`RUN_ALL_TESTS.bat`](RUN_ALL_TESTS.bat), or run `tests/test_*.py` with any Python 3.10+.
   The suite is **headless** — it needs neither FreeCAD nor Ollama.
 - **Architecture:** a pure-Python, standard-library-only engine that runs on FreeCAD's bundled
