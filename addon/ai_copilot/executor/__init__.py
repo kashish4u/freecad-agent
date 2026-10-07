@@ -26,7 +26,7 @@ from .vocabulary import (
     create_box, create_cylinder, create_cone, create_sphere, create_torus,
     create_sketch, sketch_on_face, drill_hole, extrude, revolve,
     loft, sweep, shell, chamfer, fillet, boolean, move, rotate, mirror, array,
-    place_on, mate, group, label,
+    place_on, mate, group, label, remove,
 )
 
 # Registry: command name (as in commands.schema.json) -> vocabulary function.
@@ -57,6 +57,7 @@ REGISTRY: Dict[str, Callable[[object, dict], List]] = {
     "mate": mate,
     "group": group,
     "label": label,
+    "remove": remove,
 }
 
 

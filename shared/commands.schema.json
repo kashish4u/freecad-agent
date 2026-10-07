@@ -352,6 +352,16 @@
           "note": { "type": "string", "description": "optional free-text note stored on the part (e.g. material, spec)" }
         }
       }
+    },
+    "remove": {
+      "summary": "Remove a document object (a feature OR a primitive) by id/label/name. In the Part workbench a feature (fillet, chamfer, shell, boolean, ...) is itself a separate object, so this command removes both features and primitives. To remove a single edge or face (a sub-element, not an object), first resolve it to the feature that owns it. Bare sub-elements cannot be removed directly.",
+      "params": {
+        "type": "object",
+        "required": ["target"],
+        "properties": {
+          "target": { "type": "string", "description": "id/label/name of the object (or feature) to remove" }
+        }
+      }
     }
   }
 }

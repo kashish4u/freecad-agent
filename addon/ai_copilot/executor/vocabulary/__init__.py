@@ -43,11 +43,12 @@ from .place_on import place_on
 from .mate import mate
 from .group import group
 from .label import label
+from .remove import remove
 
 __all__ = [
     "create_box", "create_cylinder", "create_cone", "create_sphere",
     "create_torus", "create_sketch", "sketch_on_face", "drill_hole", "extrude",
     "revolve", "loft", "sweep", "shell", "chamfer", "fillet", "boolean",
     "move", "rotate", "mirror", "array",
-    "place_on", "mate", "group", "label",
+    "place_on", "mate", "group", "label", "remove",
 ]

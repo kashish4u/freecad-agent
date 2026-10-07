@@ -154,6 +154,34 @@ def run_scenario():
         assert not r["ok"], "rectangle without width/height should be refused"
         details["create_sketch_missing_dims"] = "refused"
 
+        # 13) remove an existing object -> ok, nothing created, object gone.
+        r = executor.execute({"cmd": "remove", "params": {"target": box_id}})
+        assert r["ok"], f"remove failed: {r}"
+        assert r["created_ids"] == [], "remove should not create anything"
+        assert FreeCAD.ActiveDocument.getObject(box_id) is None, \
+            "the removed object must no longer exist in the document"
+        details["remove_existing_object"] = "gone"
+
+        # 13b) remove a feature (a fillet object) -> ok, feature gone, body kept.
+        r = executor.execute({"cmd": "create_box",
+                              "params": {"length": 30, "width": 25, "height": 20}})
+        body_id = r["created_ids"][0]
+        r = executor.execute({"cmd": "fillet", "params": {"target": body_id,
+                                                          "radius": 1}})
+        assert r["ok"], f"fillet for remove test failed: {r}"
+        fillet_id = r["created_ids"][0]
+        r = executor.execute({"cmd": "remove", "params": {"target": fillet_id}})
+        assert r["ok"], f"remove feature failed: {r}"
+        assert FreeCAD.ActiveDocument.getObject(fillet_id) is None, \
+            "the removed feature object must no longer exist"
+        details["remove_feature_object"] = "gone"
+
+        # 13c) remove a MISSING object -> graceful failure (not found).
+        r = executor.execute({"cmd": "remove", "params": {"target": "Nope"}})
+        assert not r["ok"] and "not found" in r["error"], \
+            f"missing target not handled: {r}"
+        details["remove_missing_target"] = "refused"
+
         return True, details
     finally:
         mock_freecad.uninstall()

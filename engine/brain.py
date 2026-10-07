@@ -338,6 +338,17 @@ class Brain:
             "a boss out of the face; extrude with op 'cut' sinks a POCKET into the "
             "body. Do not guess face numbers - use 'where'.",
             "",
+            "To REMOVE an object or feature use remove with 'target' = its name or "
+            "label (from the document overview). In the Part workbench a feature "
+            "(fillet, chamfer, shell, boolean, ...) is itself an object, so remove "
+            "handles both 'remove the fillet' and 'remove the box'. Removing a "
+            "feature leaves the rest of the body; removing a primitive removes that "
+            "whole object. For a single EDGE or FACE (a sub-element, not an object) "
+            "first resolve it to the feature that owns it and remove that. Sizes "
+            "accept plain numbers (mm) or keywords: '10mm'/'2 inch'/'3 cm'/'0.5in', "
+            "and fuzzy words like 'big'/'small'/'large'/'thin'/'thick' which the tool "
+            "scales to the existing geometry.",
+            "",
             "EXAMPLES (input on the left, the exact JSON you must output on the right):",
             'Request: "create a box 30x20x10"',
             '{"actions": [{"type": "command", "cmd": "create_box", '
@@ -439,6 +450,18 @@ class Brain:
             'it matters for mounting)',
             '{"actions": [], "ask": {"question": "What diameter should the '
             'mounting hole have?", "options": ["5", "6", "8"], "default": 6}}',
+            'Request: "remove the fillet" (document has Fillet)',
+            '{"actions": [{"type": "command", "cmd": "remove", '
+            '"params": {"target": "Fillet"}}]}',
+            'Request: "delete the box" (document has Box)',
+            '{"actions": [{"type": "command", "cmd": "remove", '
+            '"params": {"target": "Box"}}]}',
+            'Request: "make a big box" (document has nothing to scale to)',
+            '{"actions": [{"type": "command", "cmd": "create_box", '
+            '"params": {"length": 100, "width": 80, "height": 60}}]}',
+            'Request: "a cylinder 2 inch tall and 1 inch radius", (document has nothing)',
+            '{"actions": [{"type": "command", "cmd": "create_cylinder", '
+            '"params": {"radius": 25.4, "height": 50.8}}]}',
         ]
         return "\n".join(lines)
 
