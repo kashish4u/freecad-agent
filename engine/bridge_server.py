@@ -69,9 +69,9 @@ from bridge import (  # noqa: E402
 import fake_brain  # noqa: E402  (engine/fake_brain.py, same folder)
 import questions as questions_mod  # noqa: E402  (templated questions, ADR 0018)
 from brain import Brain, PlanError  # noqa: E402  (the real Phase 2 planning brain)
-from ollama_client import OllamaUnavailable  # noqa: E402
+from openai_client import AiUnavailable  # noqa: E402  (OpenAI-compatible endpoint)
 
-ENGINE_VERSION = "0.13.0"
+ENGINE_VERSION = "0.14.0"
 
 # Phase 3 "geometric RAG": before planning we fetch perception.detail for the
 # existing objects so the model sees real Edge*/Face* references. We only do this
@@ -442,7 +442,7 @@ class Session:
         try:
             plan = self._call_plan(text, overview, details,
                                    history=list(self._history))
-        except OllamaUnavailable as exc:
+        except AiUnavailable as exc:
             self._notify(task_id, "unavailable", str(exc), privacy="local")
             return {"accepted": False, "task_id": task_id, "error": str(exc)}
         except PlanError as exc:
@@ -695,7 +695,7 @@ class Session:
                                            done=state.done_features,
                                            feedback=feedback,
                                            history=list(self._history))
-                except (OllamaUnavailable, PlanError) as exc:
+                except (AiUnavailable, PlanError) as exc:
                     last_error = str(exc)
                     self._notify(task_id, "error", last_error, privacy="local")
                     continue
@@ -1174,19 +1174,41 @@ class Session:
             self._notify(task_id, "python",
                          f"proposing free Python: {reason}", privacy="local")
             try:
-                return self.peer.call("python.execute",
-                                      {"code": action.get("code", ""), "reason": reason},
-                                      timeout=120)
+                res = self.peer.call("python.execute",
+                                     {"code": action.get("code", ""), "reason": reason},
+                                     timeout=120)
             except (JsonRpcError, TimeoutError) as exc:
                 return {"ok": False, "transaction_id": "", "error": str(exc)}
+            self._log_result(task_id, idx, "python", res)
+            return res
         cmd = action.get("cmd")
         self._notify(task_id, "executing", f"action {idx}: {cmd}", privacy="local")
         try:
-            return self.peer.call("command.execute",
-                                  {"cmd": cmd, "params": action.get("params", {})},
-                                  timeout=60)
+            res = self.peer.call("command.execute",
+                                 {"cmd": cmd, "params": action.get("params", {})},
+                                 timeout=60)
         except (JsonRpcError, TimeoutError) as exc:
             return {"ok": False, "transaction_id": "", "error": str(exc)}
+        self._log_result(task_id, idx, cmd, res)
+        return res
+
+    def _log_result(self, task_id: str, idx: int, cmd: str, res: dict) -> None:
+        """Log the outcome of one executed command (ok / created ids / error).
+
+        The add-on returns {ok, created_ids, recompute_ok, error}; the engine
+        previously discarded `error`, so command failures were invisible in
+        engine.log and the model's repair prompt got a blank FreeCAD error.
+        Logging it here makes failures diagnosable and gives the model a real
+        error to fix the exact action instead of reinventing the whole part.
+        """
+        if not isinstance(res, dict):
+            return
+        if res.get("ok"):
+            log(f"[action {idx}] {cmd} OK "
+                f"created={res.get('created_ids')} "
+                f"recompute_ok={res.get('recompute_ok')}")
+        else:
+            log(f"[action {idx}] {cmd} FAILED: {res.get('error')}")
 
     def on_user_cancel(self, params: dict) -> dict:
         """
@@ -1372,7 +1394,7 @@ class Session:
                          "replanning with your clarification", privacy="local")
             try:
                 plan = replan(text)
-            except (OllamaUnavailable, PlanError) as exc:
+            except (AiUnavailable, PlanError) as exc:
                 self._notify(task_id, "error",
                              f"replanning after the clarification failed: {exc}")
                 plan = dict(plan)
@@ -1513,23 +1535,26 @@ def _register_engine_handlers(peer: JsonRpcPeer, session: "Session",
 
 def _prepare_ai(brain: "Brain") -> None:
     """
-    Transparent Ollama auto-start + reachability log (ADR 0007). Shared by both run
+    Transparent AI auto-start + reachability log (ADR 0007). Shared by both run
     modes so natural language works the same whether the engine was launched by the
     add-on (client) or by the .bat (server). Defensive about the brain interface so
     a stub brain (headless tests) is fine.
+
+    The provider (Ollama, OpenAI, Groq, LM Studio, ...) is read from
+    engine/ai_config.py; this only logs whether it is reachable.
     """
     if hasattr(brain, "ensure_server"):
         autostart = brain.ensure_server(log=log)
-        log(f"local AI (Ollama) auto-start: {autostart.get('status')} - {autostart.get('message')}")
+        log(f"local AI auto-start: {autostart.get('status')} - {autostart.get('message')}")
     avail = brain.availability()
     if avail.get("available"):
         models = ", ".join(avail.get("models", [])) or "(none installed)"
         flag = "OK" if avail.get("has_default_model") else "default model NOT pulled"
-        log(f"local AI (Ollama): reachable [{flag}]. model={avail.get('model')}; installed: {models}")
+        log(f"AI provider reachable [{flag}]. model={avail.get('model')}; installed: {models}")
     else:
-        log("local AI (Ollama): NOT reachable. Natural language will be refused "
-            "gracefully; structured commands from the panel still work, and "
-            "natural language resumes by itself once Ollama is up (no restart).")
+        log("AI provider NOT reachable. Natural language will be refused gracefully; "
+            "structured commands from the panel still work, and natural language "
+            "resumes by itself once the provider is up (no restart).")
         log(f"  -> {avail.get('reason')}")
 
 

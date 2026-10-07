@@ -35,6 +35,8 @@ import urllib.error
 import urllib.request
 from typing import Any, Dict, List, Optional
 
+from openai_client import AiUnavailable  # Ollama is one OpenAI-compatible provider
+
 DEFAULT_URL = os.environ.get("FREECAD_AGENT_OLLAMA_URL", "http://127.0.0.1:11434")
 DEFAULT_MODEL = os.environ.get("FREECAD_AGENT_OLLAMA_MODEL", "qwen3:4b")
 # Per-call timeout. Default is UNLIMITED (None): wait as long as the model needs,
@@ -56,10 +58,12 @@ _RAW_NUM_CTX = os.environ.get("FREECAD_AGENT_OLLAMA_NUM_CTX", "").strip()
 DEFAULT_NUM_CTX: int = int(_RAW_NUM_CTX) if _RAW_NUM_CTX else 8192
 
 
-class OllamaUnavailable(RuntimeError):
+class OllamaUnavailable(AiUnavailable):
     """Raised when Ollama cannot be reached or the model is missing.
 
     The message is written to be shown straight to the user (principle 9).
+    Subclasses AiUnavailable (openai_client) so callers that catch the generic
+    exception keep working across every OpenAI-compatible provider.
     """
 
 

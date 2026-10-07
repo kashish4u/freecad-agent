@@ -93,7 +93,8 @@ def ensure_running(
 
     Args:
       client:       anything with a no-raise `is_available() -> bool` method
-                    (our OllamaClient). Used as the reachability probe.
+                    (our AiClient with an Ollama-style endpoint). Used as the
+                    reachability probe.
       log:          optional one-arg logger for human-readable progress.
       wait_seconds: how long to wait for a freshly-launched server to answer.
       poll_interval, spawn, which, sleep: injection points for tests.

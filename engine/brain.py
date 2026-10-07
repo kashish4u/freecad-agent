@@ -2,17 +2,19 @@
 engine/brain.py - the REAL planning brain (Phase 2).
 
 It replaces the "decision" role of the Phase 1 fake brain: given a natural-language
-request (and a concise perception of the active document), it asks a local model
-(via Ollama) to produce a PLAN: an ordered list of actions. Each action is either
+request (and a concise perception of the active document), it asks a model
+(via any OpenAI-compatible endpoint, see engine/ai_config.py) to produce a PLAN:
+an ordered list of actions. Each action is either
 
   - a structured-vocabulary command  {type:"command", cmd, params}, or
   - a free-Python proposal           {type:"python", code, reason}.
 
 Design choices (see ADR 0004):
   - Model-agnostic structured output: we describe the exact JSON shape in the
-    system prompt and force JSON mode (ollama format="json"). We do NOT rely on a
-    specific model's native tool-calling, so the engine "adapts, not excludes"
-    (principle 9). The tester's model is qwen3:4b, but nothing here is tuned to it.
+    system prompt and force JSON mode (OpenAI response_format / Ollama format).
+    We do NOT rely on a specific model's native tool-calling, so the engine
+    "adapts, not excludes" (principle 9). The tester's model is qwen3:4b, but
+    nothing here is tuned to it: swap the provider in ai_config.json and it works.
   - The vocabulary the model sees is GENERATED from shared/commands.schema.json
     (principle 5: the vocabulary is neutral data). Add a command to the schema and
     the brain automatically offers it to the model.
@@ -23,7 +25,7 @@ Design choices (see ADR 0004):
     error back to the model and ask for a corrected action.
 
 This module has NO dependency on FreeCAD and is fully testable headless by
-injecting a fake "chat" function in place of the Ollama client.
+injecting a fake "chat" function in place of the AI client.
 """
 
 from __future__ import annotations
@@ -33,7 +35,8 @@ from typing import Any, Callable, Dict, List, Optional
 
 import fake_brain  # engine/fake_brain.py: catalog loader + validator (stdlib)
 import questions   # engine/questions.py: templated questions (ADR 0018)
-from ollama_client import OllamaClient, OllamaUnavailable
+from ai_config import build_client
+from openai_client import AiUnavailable
 
 # A "chat" callable: (system_prompt, user_prompt) -> parsed JSON dict.
 # Default is the real Ollama client; tests inject a fake one.
@@ -49,10 +52,11 @@ class Brain:
 
     def __init__(self, catalog: Optional[fake_brain.Catalog] = None,
                  chat: Optional[ChatFn] = None,
-                 client: Optional[OllamaClient] = None) -> None:
+                 client: Optional[AiClient] = None) -> None:
         self.catalog = catalog or fake_brain.Catalog()
-        # Either an explicit chat function (tests) or a real Ollama client.
-        self._client = client or OllamaClient()
+        # Priority: an explicit chat fn (tests) > an explicit client (tests) >
+        # a real client built from engine/ai_config.py (the running engine).
+        self._client = client or build_client()
         self._chat: ChatFn = chat or self._client.chat_json
 
     # -- runtime configuration -------------------------------------------------
@@ -90,7 +94,7 @@ class Brain:
         """Report whether the local model is reachable (for graceful degradation)."""
         try:
             models = self._client.list_models()
-        except OllamaUnavailable as exc:
+        except AiUnavailable as exc:
             return {"available": False, "reason": str(exc), "models": []}
         except Exception:  # a fake chat without a real client: assume available
             return {"available": True, "reason": "", "models": []}
@@ -118,21 +122,27 @@ class Brain:
 
     def ensure_server(self, log=None, wait_seconds: float = 20.0) -> Dict[str, Any]:
         """
-        Make sure the local AI server (Ollama) is running, launching it if needed.
+        Make sure the local AI server is running, launching it if needed.
 
-        Delegates to ollama_launch.ensure_running using THIS brain's client as the
-        reachability probe. Only meaningful with a real OllamaClient; with a fake
-        chat injected for tests it is a harmless no-op probe. Never raises.
+        Only meaningful for a LOCAL provider (Ollama): a remote OpenAI-compatible
+        endpoint has nothing to start, so for `style == "openai"` this is a
+        harmless no-op. Otherwise delegates to ollama_launch.ensure_running using
+        THIS brain's client as the reachability probe. With a fake chat injected
+        for tests it is a harmless no-op probe. Never raises.
         """
+        # Remote endpoint: nothing to launch locally.
+        if str(getattr(self._client, "style", "auto")).lower() == "openai":
+            return {"status": "skipped", "launched": False,
+                    "message": "remote endpoint: nothing to start."}
         try:
             from ollama_launch import ensure_running
         except Exception as exc:  # pragma: no cover - import guard
             return {"status": "error", "launched": False, "message": str(exc)}
-        # The client must expose a no-raise is_available(); the real OllamaClient
-        # does. If a bare fake without it was injected, skip gracefully.
+        # The client must expose a no-raise is_available(); the real client does.
+        # If a bare fake without it was injected, skip gracefully.
         if not callable(getattr(self._client, "is_available", None)):
             return {"status": "skipped", "launched": False,
-                    "message": "no real Ollama client to probe."}
+                    "message": "no real AI client to probe."}
         return ensure_running(self._client, log=log, wait_seconds=wait_seconds)
 
     # -- planning --------------------------------------------------------------
@@ -181,7 +191,7 @@ class Brain:
                                  feedback, history)
         try:
             reply = self._chat(system, user)
-        except OllamaUnavailable:
+        except AiUnavailable:
             raise
         except Exception as exc:  # parsing or transport problem
             raise PlanError(f"the model did not return a usable plan: {exc}") from exc
@@ -201,9 +211,12 @@ class Brain:
         """
         system = self._system_prompt()
         user = (
-            "A previous action FAILED when executed in FreeCAD. "
-            "Return a corrected plan as the same JSON object with an 'actions' "
-            "array (usually a single fixed action). Do not repeat the same mistake.\n\n"
+            "A previous action FAILED when executed in FreeCAD. Return a "
+            "corrected plan as the same JSON object with an 'actions' array, "
+            "where actions[0] is ONLY that one failed action, corrected. Keep the "
+            "same overall approach - do not switch to a totally different "
+            "command or rebuild the part, just fix the one mistake so the "
+            "command succeeds. Do not repeat the same mistake.\n\n"
             f"Original request: {request}\n"
             f"Failed action: {json.dumps(failed_action)}\n"
             f"FreeCAD error: {error}\n\n"
@@ -236,9 +249,25 @@ class Brain:
             "PYTHON for FreeCAD as an action of type 'python' with fields 'code' "
             "(FreeCAD Python using the variables `doc` and `FreeCAD`) and 'reason' "
             "(why the vocabulary was not enough). The user always sees this code.",
+             "",
+             "FREE PYTHON RULES: import FreeCAD and import Part -- the geometry "
+             "module is `Part` (never `FreeCADPart`, though `import FreeCADPart` "
+             "also works as an alias for `Part`). Build shapes with `Part.makeBox`, "
+             "`Part.makeCone`, `Part.makeCylinder`, `Part.makeGeometryFusion([...])`, "
+             "`Part.Cut`, `Part.Union`, etc. Keep the code COMPLETE and "
+             "self-contained, and end by creating a document feature (assign the "
+             "final shape to a variable so it appears as a new object in `doc`). "
+             "Prefer the structured commands over Python whenever they can express "
+             "the shape.",
             "",
             "To reference an EXISTING object, use the exact `id` from the document "
             "overview the user gives you. Do not invent ids.",
+            "",
+            "CRITICAL OUTPUT RULE: emit ONLY the raw JSON object and NOTHING "
+            "else. Do NOT write any <think>, reasoning, thinking text, code "
+            "fences (```), or explanation before or after the JSON. You are a "
+            "thinking model - suppress all internal reasoning and return just "
+            "this one JSON object.",
             "",
             "Answer with ONE JSON object, no prose, with this exact shape:",
             '{"actions": [',
