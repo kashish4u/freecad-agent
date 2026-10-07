@@ -13,15 +13,6 @@ It runs on a **local** language model via Ollama (nothing leaves your machine) a
 
 </div>
 
-> ### ⚠️ Status: MVP · `v0.13.0`
-> Works end-to-end and has been validated on real multi-step parts — it now builds a whole part
-> from one paragraph, **asks when a crucial value is missing**, and remembers the session. It is
-> still an **early, non-commercial hobby/research project**. Read [Limits](#limits) before
-> relying on it — honesty first.
->
-> **[▶ Watch the demo](https://dai.ly/xamziuq)** · 2½ min (wait times trimmed) ·
-> [mp4 in this repo](docs/media/demo.mp4)
-
 ## Table of contents
 
 - [Highlights](#highlights)
