@@ -3,7 +3,7 @@
   "$id": "https://github.com/freecad-agent/shared/commands.schema.json",
   "title": "Structured Vocabulary",
   "description": "The structured vocabulary as neutral DATA (principle 5). The engine reads this file to know which commands exist and with which parameters (for tool calling); the add-on provides the IMPLEMENTATION in addon/ai_copilot/executor/vocabulary/. Adding a command = one entry here + one function in the executor. This is v0.1: a minimal catalog. Units are mm and degrees unless stated otherwise.",
-  "version": "0.7.0",
+  "version": "0.8.0",
 
   "$defs": {
     "commandInvocation": {
@@ -299,6 +299,57 @@
           "op": { "type": "string", "enum": ["union", "difference", "intersection"] },
           "a": { "type": "string", "description": "id of body A" },
           "b": { "type": "string", "description": "id of body B" }
+        }
+      }
+    },
+    "place_on": {
+      "summary": "Place a part ON (rest on top of / below) another part's face, by reading the real geometry. The model says 'put the bracket on the base plate'; it does NOT compute where. Pick the face with 'face' (default top; or bottom/left/right/front/back). Only the target's position changes; keep its orientation (rotate it first if you need it turned).",
+      "params": {
+        "type": "object",
+        "required": ["target", "below"],
+        "properties": {
+          "target": { "type": "string", "description": "id of the object to reposition" },
+          "below": { "type": "string", "description": "id of the object whose face the target rests on" },
+          "face": { "type": "string", "enum": ["top", "bottom", "left", "right", "front", "back"], "description": "which face of 'below' to rest on (default top)" },
+          "gap": { "type": "number", "minimum": 0, "description": "gap in mm between the target and the face (default 0 = touching)" }
+        }
+      }
+    },
+    "mate": {
+      "summary": "Joint assembly: mate two parts so a face of one touches a face of the other, facing each other. General form of 'place_on' (which is the bottom-of-a-on-top-of-b special case). Give each part's face by name. With 'align' (default on), the tool also rotates the first part so its face points straight at the other; set align=false to only move it, keeping its current orientation.",
+      "params": {
+        "type": "object",
+        "required": ["a", "b", "face_a", "face_b"],
+        "properties": {
+          "a": { "type": "string", "description": "id of the part to reposition" },
+          "b": { "type": "string", "description": "id of the part it mates against" },
+          "face_a": { "type": "string", "enum": ["top", "bottom", "left", "right", "front", "back"], "description": "face of 'a' that will touch 'b'" },
+          "face_b": { "type": "string", "enum": ["top", "bottom", "left", "right", "front", "back"], "description": "face of 'b' that will touch 'a'" },
+          "gap": { "type": "number", "minimum": 0, "description": "gap in mm between the two faces (default 0 = touching)" },
+          "align": { "type": "boolean", "description": "rotate 'a' so its face points at 'b' (default true; false = move only)" }
+        }
+      }
+    },
+    "group": {
+      "summary": "Put several parts into a named group (a folder in the assembly tree). Reusing an existing group name adds to that group instead of making a new one. This is how an assembly is organised into a body hierarchy.",
+      "params": {
+        "type": "object",
+        "required": ["name", "members"],
+        "properties": {
+          "name": { "type": "string", "description": "group name" },
+          "members": { "type": "array", "items": { "type": "string" }, "description": "ids of the objects to include in the group" }
+        }
+      }
+    },
+    "label": {
+      "summary": "Name a part (set its label) and, optionally, attach a note. Naming is the first step of MBD: every part in an assembly should have a clear name so the assembly tree, drawings and downstream tools can address it.",
+      "params": {
+        "type": "object",
+        "required": ["target", "label"],
+        "properties": {
+          "target": { "type": "string", "description": "id of the object to label" },
+          "label": { "type": "string", "description": "the name/label to give the part" },
+          "note": { "type": "string", "description": "optional free-text note stored on the part (e.g. material, spec)" }
         }
       }
     }

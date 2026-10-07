@@ -33,6 +33,17 @@ class Vector:
     def __sub__(self, other: "Vector") -> "Vector":
         return Vector(self.x - other.x, self.y - other.y, self.z - other.z)
 
+    def __mul__(self, scalar: float) -> "Vector":
+        # FreeCAD Vector supports scalar multiplication (v * s); needed by the
+        # assembly helpers (normal * gap).
+        return Vector(self.x * scalar, self.y * scalar, self.z * scalar)
+
+    def __rmul__(self, scalar: float) -> "Vector":
+        return self.__mul__(scalar)
+
+    def __truediv__(self, scalar: float) -> "Vector":
+        return Vector(self.x / scalar, self.y / scalar, self.z / scalar)
+
     def __eq__(self, other) -> bool:
         return (isinstance(other, Vector)
                 and abs(self.x - other.x) < 1e-9
@@ -262,6 +273,11 @@ class DocumentObject:
             self._constraints = []
         self._constraints.append(constraint)
         return 0
+
+    def addProperty(self, type: str, name: str, group: str, value) -> bool:
+        """Record a custom property (MBD note) so label can annotate a part."""
+        setattr(self, name, value)
+        return True
 
 
 class Document:

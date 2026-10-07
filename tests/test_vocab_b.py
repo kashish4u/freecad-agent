@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 test_vocab_b.py - Phase 7 vocabulary B: rich sketch profiles + loft/sweep/shell
-(ADR 0021, commands schema v0.7.0).
+(ADR 0021, commands schema v0.8.0).
 
 Runs the REAL executor against the fake FreeCAD (no running FreeCAD), plus the
 pure engine helpers of the multi-profile chaining.
@@ -53,9 +53,9 @@ def run_scenario():
         details = {}
         doc = mod.newDocument("T")
 
-        # 0) Contract alignment (schema v0.7.0 <-> REGISTRY).
+        # 0) Contract alignment (schema v0.8.0 <-> REGISTRY).
         cat = fake_brain.Catalog()
-        assert cat.version == "0.7.0", f"schema version: {cat.version}"
+        assert cat.version == "0.8.0", f"schema version: {cat.version}"
         missing = [n for n in cat.names() if n not in executor.REGISTRY]
         assert not missing, f"schema commands without implementation: {missing}"
         extra = [n for n in executor.REGISTRY if cat.spec(n) is None]
@@ -249,7 +249,7 @@ def test_vocab_b():
 
 
 if __name__ == "__main__":
-    print("== test_vocab_b: rich profiles + loft/sweep/shell (schema v0.7.0) ==")
+    print("== test_vocab_b: rich profiles + loft/sweep/shell (schema v0.8.0) ==")
     try:
         ok, details = run_scenario()
     except AssertionError as exc:

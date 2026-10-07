@@ -320,3 +320,121 @@ def select_edge_indices(shape, where: str = "all") -> List[int]:
             f"no edges matched selector '{where}' on this shape; "
             "try 'all' or list explicit edge ids")
     return chosen
+
+
+# --- placement-by-reference helpers (phase 3: placement & assembly) ------------
+# Assembly commands place a PART RELATIVE TO ANOTHER PART by reading real
+# geometry (a face's centre + outward normal) instead of trusting coordinates
+# the model guesses (principle 7: the executor perceives; the model declares
+# intent). These helpers turn a *named face* ("top") into a real point and
+# normal, measure a part's extent along a direction, compute the rotation that
+# aligns one face normal onto another, and perform the mating placement shared
+# by place_on (stacking) and mate (general joint).
+
+# The face of the mating part that touches `face` (opposite side). Used by
+# place_on to derive the target's touching face from below's face.
+PLACE_OPPOSITE = {
+    "top": "bottom", "bottom": "top",
+    "left": "right", "right": "left",
+    "front": "back", "back": "front",
+}
+
+_FACES = {
+    "top": (lambda bb: (0.5 * (bb.XMin + bb.XMax), 0.5 * (bb.YMin + bb.YMax), bb.ZMax),
+             (0, 0, 1)),
+    "bottom": (lambda bb: (0.5 * (bb.XMin + bb.XMax), 0.5 * (bb.YMin + bb.YMax), bb.ZMin),
+               (0, 0, -1)),
+    "right": (lambda bb: (bb.XMax, 0.5 * (bb.YMin + bb.YMax), 0.5 * (bb.ZMin + bb.ZMax)),
+              (1, 0, 0)),
+    "left": (lambda bb: (bb.XMin, 0.5 * (bb.YMin + bb.YMax), 0.5 * (bb.ZMin + bb.ZMax)),
+             (-1, 0, 0)),
+    "front": (lambda bb: (0.5 * (bb.XMin + bb.XMax), bb.YMax, 0.5 * (bb.ZMin + bb.ZMax)),
+              (0, 1, 0)),
+    "back": (lambda bb: (0.5 * (bb.XMin + bb.XMax), bb.YMin, 0.5 * (bb.ZMin + bb.ZMax)),
+             (0, -1, 0)),
+}
+
+
+def face_plane(obj, face) -> "tuple":
+    """
+    Return (center, normal) for a named planar face of obj, derived from its
+    bounding box (the object's real extent in space). `face` is one of
+    top/bottom/left/right/front/back; the normal points OUTWARD from that face.
+    Used by placement-by-reference (place_on/mate): the engine locates the face,
+    so the model never guesses a face number or an absolute point.
+    """
+    import FreeCAD
+    bb = bounding_box(obj)
+    if bb is None:
+        raise ValueError(f"{getattr(obj, 'Name', '?')} has no shape/bbox yet; "
+                         "recompute the document first")
+    key = str(face).strip().lower()
+    if key not in _FACES:
+        raise ValueError(
+            f"face must be one of top/bottom/left/right/front/back (got {face!r})")
+    center_func, normal = _FACES[key]
+    center = center_func(bb)
+    return FreeCAD.Vector(*center), FreeCAD.Vector(*normal)
+
+
+def rotation_between(u, v):
+    """
+    FreeCAD.Rotation that maps unit vector u onto unit vector v, computed from the
+    axis (u x v) and angle (acos(u . v)). Used by assembly joints to orient one
+    part's face normal onto another's, so the engine computes the real rotation
+    instead of the model guessing Euler angles.
+    """
+    import math
+    import FreeCAD
+
+    def _len(x, y, z):
+        return math.sqrt(x * x + y * y + z * z)
+
+    ulen = _len(u.x, u.y, u.z) or 1.0
+    vlen = _len(v.x, v.y, v.z) or 1.0
+    ux, uy, uz = u.x / ulen, u.y / ulen, u.z / ulen
+    vx, vy, vz = v.x / vlen, v.y / vlen, v.z / vlen
+
+    dot = ux * vx + uy * vy + uz * vz
+    if dot > 0.999999:
+        return FreeCAD.Rotation()                    # already parallel
+    if dot < -0.999999:
+        # Opposite directions: 180 about any axis perpendicular to u.
+        ax = 0.0 if abs(ux) > 0.9 else 1.0
+        ay = 1.0 if abs(ux) <= 0.9 else 0.0
+        az = 0.0
+        return FreeCAD.Rotation(FreeCAD.Vector(ax, ay, az), 180.0)
+    cx = uy * vz - uz * vy
+    cy = uz * vx - ux * vz
+    cz = ux * vy - uy * vx
+    clen = _len(cx, cy, cz) or 1.0
+    angle = math.degrees(math.acos(max(-1.0, min(1.0, dot))))
+    return FreeCAD.Rotation(FreeCAD.Vector(cx / clen, cy / clen, cz / clen), angle)
+
+
+def place_against(a, a_face, b, b_face, gap: float = 0.0, align: bool = False):
+    """
+    Position part `a` so its face `a_face` mates part `b`'s face `b_face`: a's
+    face touches b's face, `gap` apart, and (when align) a's face normal is turned
+    to point away from b. Pure placement: only a.Placement.Base (and, if align,
+    its Rotation) changes; a's shape is untouched (principle 2). Shared by place_on
+    (stacking, align=False) and mate (general joint, align=True).
+    """
+    import FreeCAD
+    gap = float(gap or 0.0)
+    if gap < 0:
+        raise ValueError("gap must be >= 0 (negative means overlapping)")
+    center_b, n_b = face_plane(b, b_face)
+    center_a, n_a = face_plane(a, a_face)
+    neg_nb = FreeCAD.Vector(-n_b.x, -n_b.y, -n_b.z)
+    rotation = rotation_between(n_a, neg_nb) if align else FreeCAD.Rotation()
+    desired_face = center_b + neg_nb * gap
+    # The part's shape is defined in LOCAL coords (bbox corner at the local
+    # origin), so the placement Base is the point whose local image is `center_a`
+    # mapped onto desired_face: Base = desired_face - Rotation.multVec(center_a).
+    # This makes a's face TOUCH b's face exactly. The earlier formula placed
+    # Base at the part's CENTRE instead of its local origin, leaving a hole of
+    # half the part's depth (a silent wrong placement - principle 7).
+    a.Placement = FreeCAD.Placement(desired_face - rotation.multVec(center_a),
+                                    rotation * a.Placement.Rotation)
+    return a

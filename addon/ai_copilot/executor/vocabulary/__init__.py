@@ -8,7 +8,9 @@ executor's REGISTRY.
 
 Phase 1 implemented `create_box` and `create_cylinder`. Phase 2 adds the rest of
 the catalog: `drill_hole`, `extrude`, `chamfer`, `fillet`, `boolean`. The Phase 2
-commands often reference EXISTING objects/edges (see _common.py).
+commands often reference EXISTING objects/edges (see _common.py). Phase 3 adds the
+assembly commands: `place_on`/`mate` (placement-by-reference joints, they read a
+part's real face), `group` (body hierarchy) and `label` (MBD annotation).
 
 Vocabulary function convention:
     def command(doc, params: dict) -> list:  # returns the created/modified objects
@@ -37,10 +39,15 @@ from .move import move
 from .rotate import rotate
 from .mirror import mirror
 from .array import array
+from .place_on import place_on
+from .mate import mate
+from .group import group
+from .label import label
 
 __all__ = [
     "create_box", "create_cylinder", "create_cone", "create_sphere",
     "create_torus", "create_sketch", "sketch_on_face", "drill_hole", "extrude",
     "revolve", "loft", "sweep", "shell", "chamfer", "fillet", "boolean",
     "move", "rotate", "mirror", "array",
+    "place_on", "mate", "group", "label",
 ]
