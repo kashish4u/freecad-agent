@@ -1,161 +1,161 @@
+<div align="center">
+
+![FreeCAD Agent logo](docs/media/logo.svg)
+
 # FreeCAD Agent
 
-A **local-AI copilot** for [FreeCAD](https://www.freecad.org/): type what you want in plain
-English and it performs real modeling actions inside FreeCAD — from a single operation to a
-whole multi-step component. It runs on a **local** language model via Ollama (nothing leaves
-your machine) and sits on top of an **unmodified** FreeCAD: it is an add-on, not a fork.
+**A local-AI copilot for FreeCAD** — describe a part in plain English and it performs
+**real modeling actions** inside FreeCAD, from a single box to a whole multi-step component.
+It runs on a **local** language model via Ollama (nothing leaves your machine) and sits on an
+**unmodified** FreeCAD: this is an add-on, not a fork.
 
-> **Status: MVP (v0.13.0).** It works end-to-end and has been validated on real multi-step
-> parts: it now builds a whole part described in one paragraph, asks when a crucial value is
-> missing, and remembers the session. It is still an early, non-commercial hobby/research
-> project. Read the [Limits](#limits) section before using it — honesty first.
+![Tests](https://img.shields.io/badge/tests-53%20passing-328a39) ![Version](https://img.shields.io/badge/version-0.13.0-2563eb) ![License](https://img.shields.io/badge/license-LGPL--2.1-4d7c51) ![Python](https://img.shields.io/badge/python-3.10%2B-0891b2) ![FreeCAD](https://img.shields.io/badge/freecad-1.1%2B-1d4ed8) ![Platform](https://img.shields.io/badge/platform-windows%20%7C%20macos%20%7C%20linux-0d9488)
 
-**[▶ Watch the demo](https://dai.ly/xamziuq)** *(2½ minutes, wait times trimmed — also available as
-[mp4 in this repo](docs/media/demo.mp4))*
+</div>
 
-## What it does
+> ### ⚠️ Status: MVP · `v0.13.0`
+> Works end-to-end and has been validated on real multi-step parts — it now builds a whole part
+> from one paragraph, **asks when a crucial value is missing**, and remembers the session. It is
+> still an **early, non-commercial hobby/research project**. Read [Limits](#limits) before
+> relying on it — honesty first.
+>
+> **[▶ Watch the demo](https://dai.ly/xamziuq)** · 2½ min (wait times trimmed) ·
+> [mp4 in this repo](docs/media/demo.mp4)
 
-You write, for example:
+## Table of contents
 
-    create a box 50x50x12 and drill a 10 mm hole in the centre
+- [Highlights](#highlights)
+- [What you can model](#what-you-can-model)
+- [How it works](#how-it-works)
+- [Install](#install)
+- [Quick start](#quick-start)
+- [Example prompts](#example-prompts)
+- [Privacy](#privacy)
+- [Development](#development)
+- [Limits](#limits)
+- [Contributing](#contributing)
+- [License](#license)
 
-and the agent perceives the document, plans the steps with the local model, and executes them
-as structured CAD commands inside **undoable transactions** — `Ctrl+Z` reverts any action.
+## Highlights
 
-The structured vocabulary today covers **20 commands** on the Part workbench: create box,
-create cylinder, create cone (and truncated cone), create sphere, create torus, create sketch
-(rectangle, circle, regular polygon, rounded slot, closed polyline), sketch on face, extrude,
-pocket, revolve, loft, sweep, shell (hollow a solid), drill hole, boolean
-(union/difference/intersection), fillet, chamfer, move, rotate, mirror, array (linear and
-polar). Fragile decisions (which edges to fillet, which face to sketch on, which object a
-follow-up step refers to) are resolved by the executor from the real geometry, not guessed by
-the model.
+- 🖱️ **Prompt → model.** Type a request; the agent perceives the document, plans the steps, and executes them as structured CAD commands inside **undoable transactions** — `Ctrl+Z` reverts any action.
+- 🧭 **Asks when unsure.** If a crucial value is missing, a card offers a proposed default. Never a permission prompt; at most **3 questions per request**.
+- 🧠 **Session memory.** A RAM-only summary of what you asked earlier, so *"now drill a hole in its centre"* resolves to the right object. Nothing is written to disk.
+- 🔒 **Local & private.** No telemetry, no cloud, nothing leaves your machine — the panel carries a fixed **Local AI** badge.
+- 🛠️ **20 structured commands** on the Part workbench, resolved from **real geometry** (never guessed); falls back to **free Python** (shown to you first) when the vocabulary isn't enough.
 
-When the vocabulary is not enough, the agent can fall back to **free Python** — but it always
-**shows you the exact code first** (transparency), and it too runs inside an undoable
-transaction.
+## What you can model
 
-Everything starts from inside FreeCAD: open the panel, click **Connect**, and the local AI
-engine starts by itself in the background. No terminal, no separate installs — the engine is
-pure Python standard library and runs on the interpreter shipped with FreeCAD.
+The agent has a small, structured vocabulary on the Part workbench. Each command is
+**resolved from the actual geometry** of your document, not from a guessed bounding box.
 
-## Build a whole part from one paragraph
+| Category | Commands |
+| --- | --- |
+| **Solids** | box, cylinder, cone (+ truncated), sphere, torus |
+| **Sketches** | rectangle, circle, regular polygon, rounded slot, closed polyline |
+| **Operations** | extrude, pocket, revolve, loft, sweep, shell (hollow) |
+| **Features** | drill hole, boolean (union / difference / intersection), fillet, chamfer |
+| **Transform** | move, rotate, mirror, linear array, polar array |
 
-Describe the part; the agent splits it into features (base, pockets, holes, rounds…), builds
-them **one at a time re-reading the real geometry in between**, and rolls back + replans a
-failed feature before moving on. Each feature is one undo step (`Ctrl+Z`).
-
-    Make a mounting bracket: a base plate 60x40x10, cut a rectangular pocket 30x20 and 5 mm
-    deep into its top face, drill two 5 mm holes at positions [10, 20] and [50, 20], and
-    chamfer the vertical edges by 1.
-
-Small local models have honest limits: keep it under ~6–8 features and give explicit
-dimensions/positions (see [Limits](#limits)).
-
-## The agent asks when unsure
-
-If a crucial value is missing ("drill a hole" — which diameter?), a card appears in the panel
-with a proposed default: click an option, type a value, or accept the default. Never a
-permission prompt, never a pop-up, at most 3 questions per request. Turn the **"Ask me when
-unsure"** checkbox off for the old silent behaviour. The questions are generated
-deterministically by the engine, so they work with **any** model; a capable model can also ask
-its own.
-
-## Session memory
-
-The engine keeps a compressed summary of what you asked earlier in the session
-("created Cylinder…"), so a follow-up like "now drill a hole in its centre" resolves to the
-right object. The memory lives in **RAM only** and dies with the engine — nothing is stored on
-disk.
-
-## Requirements
-
-- **FreeCAD 1.1 or newer** (developed and validated on 1.1.1).
-- **[Ollama](https://ollama.com/)** with a local model, for natural language. Optional but
-  recommended: without it, the structured command composer in the panel still works. Tested
-  with a small model (`qwen3:4b`, about 3.4 GB); larger models give better plans.
-- OS: **tested on Windows**. The code is cross-platform (macOS/Linux untested in the wild —
-  testers very welcome, see Limits).
-
-## Install
-
-**Via the FreeCAD Addon Manager** (once the addon is listed): Tools > Addon Manager, search
-for "FreeCAD Agent", install, restart FreeCAD.
-
-**Manual install (Windows):** download or clone this repository, then double-click
-`INSTALL_ADDON.bat`. It copies the addon into your FreeCAD `Mod` folder and prints the
-installed versions. Restart FreeCAD afterwards.
-
-**Manual install (macOS/Linux, experimental):** copy the whole repository folder into your
-FreeCAD `Mod` directory (e.g. `~/.local/share/FreeCAD/Mod/FreeCADAgent` on Linux,
-`~/Library/Application Support/FreeCAD/Mod/FreeCADAgent` on macOS), then restart FreeCAD.
-
-## Quick start
-
-1. In FreeCAD, pick the **FreeCAD Agent** workbench from the workbench selector. The panel
-   opens (or use the toolbar button).
-2. Click **Connect**. The AI engine starts automatically in the background; the panel shows
-   `Engine: running` and the engine log is one click away (**Show engine log**).
-3. If Ollama is installed but not running, the engine starts it for you. If Ollama is absent,
-   natural language is politely refused but structured commands keep working.
-4. Type a request in plain English and press **Ask the agent**. Watch the log: the agent
-   reports what it perceives, plans and executes. `Ctrl+Z` undoes any step.
-5. Long inference on slow hardware? The panel shows progress and a **Cancel** button; you can
-   also opt into a time limit.
-
-For debugging you can start the engine manually with `START_ENGINE.bat` and tick "attach to a
-manually-started engine" in the panel.
-
-## Limits
-
-This is an MVP and the limits are stated openly — please read them:
-
-- **Results depend on the model.** Tested with a small local model (`qwen3:4b`); complex
-  requests can produce wrong plans. There is bounded self-correction (max 2 repair attempts),
-  not magic. Larger models behave better: the design adapts, it does not exclude.
-- **It can be slow on weak hardware.** Local inference may take seconds to minutes per step.
-- **Tested on Windows only** so far. The code is cross-platform but macOS/Linux are untested
-  in the wild: support is experimental and feedback is very welcome.
-- **Ollama is required for natural language** (separate, free install). Structured commands
-  from the panel work without it.
-- **20 structured commands** (Part workbench). Anything else goes through the free-Python
-  channel, always shown to you before execution.
-- **Phrases that require the model to compute coordinates** (e.g. "holes equally distributed
-  on a radius") are beyond small models: give explicit positions, or use the polar `array`.
-- **Beyond ~6–8 features per request** a small model drifts; and whether the model itself
-  raises a question is model-dependent (the engine's deterministic questions always work).
-- **Not for production or safety-critical parts.** It is an assistant you supervise: always
-  review the result.
-- **MVP:** no cloud adapters yet, no guarantees; APIs and behavior may change.
+> The vocabulary is intentionally small. If a command isn't in the list, the agent writes and
+> shows you the equivalent **Python** first.
 
 ## How it works
 
-Three separate layers, connected by a local bridge (TCP on 127.0.0.1, token-authenticated,
-JSON-RPC 2.0):
+<div align="center">
 
-1. `addon/` — lives inside FreeCAD (Python 3.11): panel UI, perception of the document, and
-   execution of validated commands inside undoable transactions.
-2. `engine/` — the AI engine, a separate local process (pure standard library, zero
-   dependencies): orchestrates perceive > plan > act > repair and talks to the model.
-3. The model — external and interchangeable: today a local model via Ollama's HTTP API.
+![Architecture diagram](docs/media/architecture.svg)
 
-Shared contracts (command vocabulary, context format, bridge protocol) live in `shared/` as
-JSON Schema files. Design decisions are recorded in `docs/adr/` (ADR 0001-0021).
+</div>
 
-Privacy: no telemetry, no cloud calls, nothing leaves your machine. The panel carries a fixed
-**Local AI** badge so you always know inference happens on your machine.
+1. **Perception** — the agent asks Ollama to describe the document and the selected objects
+   (ADR 0003, 0006). It never guesses coordinates.
+2. **Planner & Validator** — it plans an ordered set of commands and validates each one against
+   the real geometry, resolving coordinates (ADR 0007).
+3. **Executor** — it applies commands as **undoable transactions** in FreeCAD (ADR 0002).
+4. **Verify & Render** — it checks the geometry, repairs if needed, and shows you the result
+   and the resulting Python.
 
-## Running the tests
+A **bounded repair loop** (≤ 3 replans) closes the gap when the first attempt doesn't match the
+intended geometry — never an infinite retry.
 
-`RUN_ALL_TESTS.bat` (Windows) runs the whole headless suite — 26 test modules, no FreeCAD or
-Ollama needed. On any OS: run the `tests/test_*.py` files with any Python 3.10+.
+> Everything the agent does is backed by an **ADR** in [`docs/adr/`](docs/adr/); the shared
+> contracts live in [`shared/`](shared/).
 
-## Feedback and contributing
+## Install
 
-Bug reports, feedback and pull requests are welcome — especially **macOS/Linux test
-reports**. Please open an issue with your OS, FreeCAD version, the phrase you typed and the
-panel/engine log.
+This is a FreeCAD **add-on** (a workbench) for an unmodified FreeCAD.
+
+**Windows (recommended):** run [`INSTALL_ADDON.bat`](INSTALL_ADDON.bat) — it copies a clean local
+copy into FreeCAD's `Mod` folder. No administrator rights required.
+
+**macOS / Linux (manual):** copy this folder to FreeCAD's Mod directory:
+
+| OS | Target |
+| --- | --- |
+| Windows | `%APPDATA%\FreeCAD\Mod\` |
+| macOS | `~/Library/Application Support/FreeCAD/Mod/` |
+| Linux | `~/.local/share/FreeCAD/Mod/` |
+
+Put it at `.../Mod/FreeCADAgent/`.
+
+## Quick start
+
+1. Install and run [Ollama](https://ollama.com/download), then pull a model (default is
+   `qwen3:4b`, but any works):
+   ```bash
+   ollama pull qwen3:4b
+   ```
+2. Install the add-on ([`INSTALL_ADDON.bat`](INSTALL_ADDON.bat) on Windows; see
+   [Install](#install) elsewhere).
+3. Reopen FreeCAD, select the **FreeCAD Agent** workbench, and click **Connect**. The engine
+   starts by itself (Ollama auto-starts if needed).
+4. Type a request in the panel. If the agent needs a value, it shows a card with a proposed
+   default — approve or edit.
+
+> Requires: **FreeCAD 1.1.x**, **Python 3.10+** (bundled with FreeCAD — the engine is pure
+> standard library), and a running **Ollama** with a model. Windows, macOS, and Linux.
+
+## Example prompts
+
+- *"Create a box 50x50x12 and drill a 10 mm hole in the centre."*
+- *"Make a mounting bracket: a base plate 60x40x10, cut a 30x20 pocket 5 mm deep into its top face, drill two 5 mm holes at [10,20] and [50,20], and chamfer the vertical edges by 1."*
+
+## Privacy
+
+The panel carries a fixed **Local AI** badge. The engine talks to a local Ollama endpoint (or any
+OpenAI-compatible provider you configure); it sends **no telemetry** and writes **nothing** to the
+cloud. Session memory lives only in RAM and disappears when FreeCAD closes.
+
+## Development
+
+- **Tests:** 53 tests across 31 modules. Run them on Windows with
+  [`RUN_ALL_TESTS.bat`](RUN_ALL_TESTS.bat), or run `tests/test_*.py` with any Python 3.10+.
+  The suite is **headless** — it needs neither FreeCAD nor Ollama.
+- **Architecture:** a pure-Python, standard-library-only engine that runs on FreeCAD's bundled
+  interpreter. The structured 20-command vocabulary is resolved from real geometry by the
+  executor. Design decisions are recorded as ADRs in [`docs/adr/`](docs/adr/); shared JSON-Schema
+  contracts live in [`shared/`](shared/).
+
+## Limits
+
+- **Small local models.** Keep requests to ~6–8 features and give **explicit dimensions and
+  positions** — the smaller the model, the more it depends on you.
+- **Early MVP.** Non-commercial, work-in-progress. If something misbehaves, the panel shows the
+  exact Python it ran, so you can always inspect or edit it.
+
+## Contributing
+
+Bug reports, feedback, and PRs are welcome — especially **macOS/Linux test reports** and extra
+examples of phrases that work (or break). When you file an issue, please include:
+
+- OS, FreeCAD version, and the exact phrase you typed.
+- The **panel log** and **engine log** (the panel has buttons to copy both).
 
 ## License
 
-[LGPL-2.1-or-later](LICENSE) — consistent with FreeCAD's license.
+Distributed under the terms of the **LGPL-2.1-or-later** license — see [`LICENSE`](LICENSE).
+
+---
+
+**Related:** [FreeCAD](https://www.freecad.org/) · [Ollama](https://ollama.com/)
